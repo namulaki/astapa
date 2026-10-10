@@ -401,22 +401,6 @@ pub async fn approve_session(
         }
     };
 
-    // Persist audit records (before schema is dropped)
-    if !diff_tables.is_empty() {
-        if let Err(e) = persist_audit_log(
-            state.session_manager.pool(),
-            session.id,
-            &session.project_id,
-            &diff_tables,
-            None, // approved_by: future enhancement
-        )
-        .await
-        {
-            error!(error = %e, session_id = %id, "Failed to persist audit log");
-            // Continue with approval even if audit fails
-        }
-    }
-
     // 8. Apply changes from shadow to production
     let applied = match apply_shadow_to_production(&client, &session).await {
         Ok(count) => count,
@@ -433,6 +417,22 @@ pub async fn approve_session(
             );
         }
     };
+
+    // Persist audit records AFTER successful apply (ensures no phantom entries)
+    if !diff_tables.is_empty() {
+        if let Err(e) = persist_audit_log(
+            state.session_manager.pool(),
+            session.id,
+            &session.project_id,
+            &diff_tables,
+            None, // approved_by: future enhancement
+        )
+        .await
+        {
+            error!(error = %e, session_id = %id, "Failed to persist audit log");
+            // Changes already applied, log error but continue
+        }
+    }
 
     // 6. Update session status to Approved
     if let Err(e) = state

@@ -196,18 +196,21 @@ pub async fn query_audit_log(
     if let Some(to) = &query.to {
         sql.push_str(&format!(" AND approved_at <= ${}", param_idx));
         param_values.push(to.to_rfc3339());
+        param_idx += 1;
     }
 
     sql.push_str(" ORDER BY approved_at DESC, id DESC");
 
-    if let Some(limit) = query.limit {
-        sql.push_str(&format!(" LIMIT {}", limit));
-    } else {
-        sql.push_str(" LIMIT 100");
-    }
+    // Parameterize LIMIT to prevent SQL injection
+    let limit_val = query.limit.unwrap_or(100).min(1000);
+    sql.push_str(&format!(" LIMIT ${}", param_idx));
+    param_values.push(limit_val.to_string());
+    param_idx += 1;
 
+    // Parameterize OFFSET to prevent SQL injection
     if let Some(offset) = query.offset {
-        sql.push_str(&format!(" OFFSET {}", offset));
+        sql.push_str(&format!(" OFFSET ${}", param_idx));
+        param_values.push(offset.to_string());
     }
 
     let rows = if param_values.is_empty() {
