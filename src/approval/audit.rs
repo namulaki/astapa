@@ -164,66 +164,60 @@ pub async fn query_audit_log(
          FROM _astapa_audit_log WHERE 1=1",
     );
 
-    // Use boxed trait objects for proper typed parameter binding
-    let mut params: Vec<Box<dyn tokio_postgres::types::ToSql + Sync + Send>> = Vec::new();
+    // Declare limit upfront so reference outlives params vec
+    let limit_val: i64 = query.limit.unwrap_or(100).min(1000);
+
+    let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
     let mut param_idx = 1;
 
-    if let Some(session_id) = &query.session_id {
+    if let Some(ref session_id) = query.session_id {
         sql.push_str(&format!(" AND session_id = ${}", param_idx));
-        params.push(Box::new(*session_id));
+        params.push(session_id);
         param_idx += 1;
     }
 
-    if let Some(project_id) = &query.project_id {
+    if let Some(ref project_id) = query.project_id {
         sql.push_str(&format!(" AND project_id = ${}", param_idx));
-        params.push(Box::new(project_id.clone()));
+        params.push(project_id);
         param_idx += 1;
     }
 
-    if let Some(table_name) = &query.table_name {
+    if let Some(ref table_name) = query.table_name {
         sql.push_str(&format!(" AND table_name = ${}", param_idx));
-        params.push(Box::new(table_name.clone()));
+        params.push(table_name);
         param_idx += 1;
     }
 
-    if let Some(row_id) = &query.row_id {
+    if let Some(ref row_id) = query.row_id {
         sql.push_str(&format!(" AND row_id = ${}", param_idx));
-        params.push(Box::new(row_id.clone()));
+        params.push(row_id);
         param_idx += 1;
     }
 
-    if let Some(from) = &query.from {
+    if let Some(ref from) = query.from {
         sql.push_str(&format!(" AND approved_at >= ${}", param_idx));
-        params.push(Box::new(*from));
+        params.push(from);
         param_idx += 1;
     }
 
-    if let Some(to) = &query.to {
+    if let Some(ref to) = query.to {
         sql.push_str(&format!(" AND approved_at <= ${}", param_idx));
-        params.push(Box::new(*to));
+        params.push(to);
         param_idx += 1;
     }
 
     sql.push_str(" ORDER BY approved_at DESC, id DESC");
 
-    // Parameterize LIMIT with proper i64 type
-    let limit_val: i64 = query.limit.unwrap_or(100).min(1000);
     sql.push_str(&format!(" LIMIT ${}", param_idx));
-    params.push(Box::new(limit_val));
+    params.push(&limit_val);
     param_idx += 1;
 
-    // Parameterize OFFSET with proper i64 type
-    if let Some(offset) = query.offset {
+    if let Some(ref offset) = query.offset {
         sql.push_str(&format!(" OFFSET ${}", param_idx));
-        params.push(Box::new(offset));
+        params.push(offset);
     }
 
-    let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = params
-        .iter()
-        .map(|p| p.as_ref() as &(dyn tokio_postgres::types::ToSql + Sync))
-        .collect();
-
-    let rows = client.query(&sql, &param_refs[..]).await?;
+    let rows = client.query(&sql, &params[..]).await?;
 
     let entries = rows
         .iter()
