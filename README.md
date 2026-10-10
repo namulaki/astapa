@@ -1,169 +1,280 @@
 <div align="center">
 
 ```
-                        _       _           
-  _ __ ___   __ _ _ __ | | ___ | |__  _   _ 
- | '_ ` _ \ / _` | '__|| |/ _ \| '_ \| | | |
- | | | | | | (_| | |   | | (_) | |_) | |_| |
- |_| |_| |_|\__,_|_|   |_|\___/|_.__/ \__,_|
-                                      proxy
+   ___   _____  _____  ___  ____   ___  
+  / _ \ / ____||_   _|/ _ \|  _ \ / _ \ 
+ | |_| |\____ \  | | | |_| | |_) | |_| |
+ |  _  | ____) | | | |  _  |  __/|  _  |
+ |_| |_||_____/  |_| |_| |_|_|   |_| |_|
 ```
 
-**Copy-on-write session isolation for PostgreSQL**
+**Database isolation for AI agents**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org)
+[![PostgreSQL](https://img.shields.io/badge/postgresql-14+-336791.svg)](https://www.postgresql.org)
+
+[Documentation](https://astapa.com/docs) · [Getting Started](#quick-start) · [API Reference](#api-reference)
 
 </div>
 
-## Overview
+---
 
-astapa sits between your application and PostgreSQL, intercepting queries and routing them through isolated sessions. Within a session:
+## The Problem
 
-- **Reads** see the original data plus any uncommitted changes
-- **Writes** go to shadow tables, leaving production data untouched
-- **Approval** atomically merges session changes into the source tables
+AI agents are writing to your database. Without guardrails, a single hallucination can corrupt production data, wipe tables, or create cascading failures. You need isolation—but spinning up database copies is slow, expensive, and doesn't reflect real data.
 
-This enables workflows like data review, staging environments, and safe bulk operations—without schema changes or application modifications.
+## The Solution
 
-## Use cases
+Astapa is a PostgreSQL proxy that creates **instant, copy-on-write sessions**. Agents read real data but write to isolated shadow tables. Changes are staged for review, then atomically merged—or discarded.
 
-| Scenario | How astapa helps |
-|----------|-------------------|
-| **Data review** | Analysts modify data in isolation; reviewers approve before production |
-| **Safe bulk operations** | Run large UPDATE/DELETE, verify results, then apply |
-| **Testing with production data** | Point tests at the proxy for realistic data without risk |
-| **AI agent sandboxing** | Let LLM agents query and modify data with human-in-the-loop approval |
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Agent     │────▶│   Astapa    │────▶│  PostgreSQL │
+│             │     │   Proxy     │     │             │
+│ INSERT INTO │     │ ┌─────────┐ │     │ public.*    │
+│ UPDATE ...  │     │ │ Session │ │     │ (untouched) │
+│ DELETE ...  │     │ │ Shadow  │ │     │             │
+└─────────────┘     │ │ Tables  │ │     └─────────────┘
+                    │ └─────────┘ │
+                    └─────────────┘
+```
 
-## Quick start
+**Zero changes to your app. Zero changes to your schema. Just point at the proxy.**
 
-### Prerequisites
+---
 
-- Rust 1.75+ (for building)
-- PostgreSQL 14+
+## Two Modes
 
-### Installation
+<table>
+<tr>
+<td width="50%">
 
-**Proxy**
+### 🧪 WIPER Mode
+**For development & testing**
+
+All mutations staged in shadow tables, **automatically discarded** at session end.
+
+- AI coding agents (Devin, Cursor, Claude Code)
+- Integration tests
+- CI/CD pipelines
+- Local development
 
 ```bash
-# Via crates.io
+?mode=wiper
+```
+
+</td>
+<td width="50%">
+
+### 🛡️ AGENTIC Mode
+**For production**
+
+All mutations staged for **human review**. Nothing touches production until approved.
+
+- AI agents on production data
+- Bulk data operations
+- Staging previews
+- Compliance workflows
+
+```bash
+?mode=agentic
+```
+
+</td>
+</tr>
+</table>
+
+---
+
+## Quick Start
+
+### Install
+
+```bash
+# Docker (recommended)
+docker run -d \
+  -e DATABASE_URL=postgres://user:pass@host:5432/db \
+  -p 5433:5433 -p 8080:8080 \
+  ghcr.io/namulaki/astapa
+
+# Cargo
 cargo install astapa
 
-# Via Docker
-docker pull ghcr.io/aprdos/astapa
-
 # From source
-git clone https://github.com/namulaki/astapa.git
-cd astapa
+git clone https://github.com/namulaki/astapa && cd astapa
 cargo build --release
 ```
 
-**SDKs**
+### Connect
 
 ```bash
-# Node.js
-npm install astapa
+# Create a session
+SESSION=$(curl -s -X POST http://localhost:8080/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"project_id": "my-agent"}' | jq -r '.id')
 
-# Python
-pip install astapa
-
-# Go
-go get github.com/namulaki/astapa/sdks/go/astapa
+# Connect through the proxy
+psql "host=localhost port=5433 dbname=mydb options='-c astapa.session=$SESSION'"
 ```
 
-**MCP Server** (for Claude Code integration)
+### Use
 
+```sql
+-- All writes go to shadow tables
+UPDATE users SET status = 'inactive' WHERE last_login < '2024-01-01';
+DELETE FROM orders WHERE status = 'abandoned';
+
+-- Reads see original data + your changes
+SELECT * FROM users WHERE status = 'inactive';
+```
+
+### Review & Apply
+
+```bash
+# See what changed
+curl http://localhost:8080/sessions/$SESSION/diff
+
+# Apply to production (or reject)
+curl -X POST http://localhost:8080/sessions/$SESSION/approve
+```
+
+---
+
+## SDKs
+
+<table>
+<tr>
+<td>
+
+**Python**
+```bash
+pip install astapa
+```
+```python
+from astapa import Astapa
+
+client = Astapa(api_url="http://localhost:8080")
+session = client.create_session(project_id="agent")
+
+with session.connect(database="mydb") as conn:
+    conn.execute("UPDATE users SET ...")
+
+session.propose()  # Submit for review
+```
+
+</td>
+<td>
+
+**Node.js**
+```bash
+npm install astapa
+```
+```typescript
+import { Astapa } from 'astapa';
+
+const client = new Astapa({ apiUrl: 'http://localhost:8080' });
+const session = await client.createSession({ projectId: 'agent' });
+
+const pool = session.createPool({ database: 'mydb' });
+await pool.query('UPDATE users SET ...');
+
+await session.propose();  // Submit for review
+```
+
+</td>
+</tr>
+<tr>
+<td>
+
+**Go**
+```bash
+go get github.com/namulaki/astapa/sdks/go/astapa
+```
+```go
+client := astapa.New("http://localhost:8080")
+session, _ := client.CreateSession("agent")
+
+db := session.Connect("mydb", "user", "pass")
+db.Exec("UPDATE users SET ...")
+
+session.Propose()  // Submit for review
+```
+
+</td>
+<td>
+
+**MCP Server** (Claude Code)
 ```bash
 npm install -g @astapa/mcp-server
 ```
-
-### Configuration
-
-```bash
-# Required
-export DATABASE_URL=postgres://user:pass@localhost:5432/mydb
-
-# Optional (showing defaults)
-export PROXY_ADDR=0.0.0.0:5433        # PostgreSQL wire protocol
-export API_ADDR=0.0.0.0:8080          # HTTP API
-export SESSION_TTL_SECONDS=3600       # 1 hour
-
-# Webhooks (optional)
-export WEBHOOK_URL=https://your-app.com/hooks/astapa
-export WEBHOOK_SECRET=your-hmac-secret
+```json
+{
+  "mcpServers": {
+    "astapa": {
+      "command": "astapa-mcp",
+      "env": {
+        "ASTAPA_API_URL": "http://localhost:8080",
+        "DATABASE_NAME": "mydb"
+      }
+    }
+  }
+}
 ```
 
-### Run
+</td>
+</tr>
+</table>
 
-```bash
-./target/release/astapa
-```
+---
 
-### Basic workflow
-
-```bash
-# 1. Create a session
-SESSION_ID=$(curl -s -X POST http://localhost:8080/sessions \
-  -H "Content-Type: application/json" \
-  -d '{"project_id": "my-project"}' | jq -r '.id')
-
-# 2. Connect through the proxy with session context
-psql "host=localhost port=5433 dbname=mydb options='-c astapa_session=$SESSION_ID'"
-
-# 3. Make changes (isolated to this session)
-UPDATE users SET status = 'inactive' WHERE last_login < '2024-01-01';
-
-# 4. Review what changed
-curl http://localhost:8080/sessions/$SESSION_ID/diff
-
-# 5. Apply to production
-curl -X POST http://localhost:8080/sessions/$SESSION_ID/approve
-```
-
-## How it works
+## How It Works
 
 ```mermaid
-flowchart LR
-    subgraph Clients
-        A[psql / app / ORM]
-    end
-    
-    subgraph astapa
-        B[SQL Parser] --> C[Table Rewriter]
-        C --> D[Session Manager]
-    end
-    
-    subgraph PostgreSQL
-        E[public.* tables]
-        F[session_* schemas]
-    end
-    
-    A --> B
-    D --> E
-    D --> F
+sequenceDiagram
+    participant Agent
+    participant Astapa
+    participant PostgreSQL
+
+    Agent->>Astapa: CREATE SESSION
+    Astapa->>PostgreSQL: Create session_xxx schema
+    Astapa-->>Agent: session_id
+
+    Agent->>Astapa: UPDATE users SET status='inactive'
+    Astapa->>PostgreSQL: Create shadow table (if first write)
+    Astapa->>PostgreSQL: INSERT into session_xxx.users__shadow
+    Astapa-->>Agent: 1 row affected
+
+    Agent->>Astapa: SELECT * FROM users
+    Astapa->>PostgreSQL: Query union view (original + shadow)
+    Astapa-->>Agent: Results (with staged changes)
+
+    Agent->>Astapa: APPROVE
+    Astapa->>PostgreSQL: Check conflicts
+    Astapa->>PostgreSQL: Atomic merge (UPSERT + DELETE)
+    Astapa->>PostgreSQL: DROP session_xxx schema
+    Astapa-->>Agent: Success
 ```
 
-When a session first writes to a table:
+### Key Concepts
 
-1. **Shadow table** created with identical schema in `session_{id}` schema
-2. **Union view** created: source rows (minus modified PKs) + shadow rows
-3. **Reads** go through the view; **writes** go to the shadow table
+| Concept | Description |
+|---------|-------------|
+| **Session** | Isolated workspace with its own schema. All writes within a session go to shadow tables. |
+| **Shadow Table** | Copy-on-write table that receives INSERTs/UPDATEs/DELETEs. Created lazily on first write. |
+| **Union View** | Combines original table rows (excluding modified PKs) with shadow table rows. Reads go here. |
+| **Approval** | Atomic merge of shadow changes into source tables. Includes conflict detection and FK validation. |
 
-On approval:
+---
 
-1. Conflict detection (concurrent modifications to same rows)
-2. Foreign key validation
-3. Atomic merge: deletes applied, shadow rows upserted
-4. Session schema dropped
-
-## API reference
+## API Reference
 
 ### Sessions
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/sessions` | Create session. Body: `{"project_id": "..."}` |
-| `GET` | `/sessions/:id` | Get session details and status |
+| `POST` | `/sessions` | Create session. Body: `{"project_id": "...", "mode": "agentic"}` |
+| `GET` | `/sessions/:id` | Get session details |
 | `DELETE` | `/sessions/:id` | Destroy session immediately |
 
 ### Workflow
@@ -181,81 +292,95 @@ On approval:
 | `GET` | `/sessions/:id/diff` | All changes grouped by table |
 | `GET` | `/sessions/:id/mutations` | Chronological mutation log |
 
-### Operations
+### Webhooks
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/health` | Health check |
-| `GET` | `/metrics` | Prometheus metrics |
+Configure `WEBHOOK_URL` to receive events:
 
-## Client connection
-
-Pass the session ID via connection options:
-
-```python
-# Python (psycopg2)
-conn = psycopg2.connect(
-    host="localhost", port=5433,
-    database="mydb", user="user", password="pass",
-    options=f"-c astapa_session={session_id}"
-)
+```json
+{
+  "event": "session.proposed",
+  "session_id": "abc123",
+  "project_id": "my-agent",
+  "diff": { "tables": [...] }
+}
 ```
 
-```javascript
-// Node.js (pg)
-const client = new Client({
-  host: 'localhost', port: 5433,
-  database: 'mydb', user: 'user', password: 'pass',
-  options: `-c astapa_session=${sessionId}`
-});
-```
+Events: `session.created`, `session.proposed`, `session.approved`, `session.rejected`, `session.destroyed`
+
+---
+
+## Configuration
 
 ```bash
-# psql
-psql "host=localhost port=5433 dbname=mydb options='-c astapa_session=...'"
+# Required
+DATABASE_URL=postgres://user:pass@localhost:5432/mydb
+
+# Server (defaults shown)
+PROXY_ADDR=0.0.0.0:5433          # PostgreSQL wire protocol
+API_ADDR=0.0.0.0:8080            # HTTP API
+SESSION_TTL_SECONDS=3600         # Auto-cleanup after 1 hour
+
+# Webhooks
+WEBHOOK_URL=https://your-app.com/hooks
+WEBHOOK_SECRET=your-hmac-secret  # Signs payloads with HMAC-SHA256
+
+# Mode default
+ASTAPA_DEFAULT_MODE=agentic      # 'wiper' or 'agentic'
 ```
+
+---
 
 ## Observability
 
-Prometheus metrics at `/metrics`:
+Prometheus metrics at `GET /metrics`:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `astapa_proxy_connections_active` | Gauge | Current connections |
-| `astapa_queries_total` | Counter | Queries by type and status |
-| `astapa_query_duration_seconds` | Histogram | Query latency |
+| `astapa_proxy_connections_active` | Gauge | Current proxy connections |
+| `astapa_queries_total` | Counter | Queries by type (select/insert/update/delete) |
+| `astapa_query_duration_seconds` | Histogram | Query latency distribution |
 | `astapa_sessions_total` | Counter | Sessions by status |
-| `astapa_approvals_total` | Counter | Approvals by result |
+| `astapa_approvals_total` | Counter | Approvals by result (success/conflict/error) |
+
+---
 
 ## Limitations
 
-- **No DDL**: CREATE, ALTER, DROP blocked within sessions
-- **Sequences**: Serial columns may have gaps after approval
-- **Scale**: Very large sessions (millions of rows) may be slow to approve
-- **Replication**: No support for logical replication or streaming
+- **No DDL** — CREATE, ALTER, DROP blocked within sessions
+- **Sequences** — Serial columns may have gaps after approval
+- **Large sessions** — Millions of rows may be slow to approve
+- **No replication** — Logical replication not supported
+
+---
 
 ## Development
 
 ```bash
 # Prerequisites
-make postgres          # Start local PostgreSQL
+docker compose up -d postgres   # or your own PostgreSQL 14+
 
-# Build and test
+# Build & test
 cargo build
 cargo test
 
-# Lint
-cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-
 # Run locally
 RUST_LOG=debug cargo run
+
+# Lint
+cargo fmt --check
+cargo clippy
 ```
 
-## Contributing
-
-Contributions welcome. Please open an issue first to discuss significant changes.
+---
 
 ## License
 
 [MIT](LICENSE)
+
+---
+
+<div align="center">
+
+**[Documentation](https://astapa.com/docs)** · **[GitHub](https://github.com/namulaki/astapa)** · **[Discord](https://discord.gg/astapa)**
+
+</div>
