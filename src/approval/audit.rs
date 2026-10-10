@@ -66,14 +66,15 @@ pub async fn persist_audit_log(
     tables: &[TableDiff],
     approved_by: Option<&str>,
 ) -> Result<usize, AuditError> {
-    let client = pool.get().await?;
+    let mut client = pool.get().await?;
+    let transaction = client.transaction().await?;
     let mut count = 0;
     let now = Utc::now();
 
     for table in tables {
         for row in &table.inserts {
             let row_id = extract_row_id(row);
-            client
+            transaction
                 .execute(
                     r#"
                     INSERT INTO _astapa_audit_log
@@ -95,7 +96,7 @@ pub async fn persist_audit_log(
         }
 
         for change in &table.updates {
-            client
+            transaction
                 .execute(
                     r#"
                     INSERT INTO _astapa_audit_log
@@ -119,7 +120,7 @@ pub async fn persist_audit_log(
 
         for row in &table.deletes {
             let row_id = extract_row_id(row);
-            client
+            transaction
                 .execute(
                     r#"
                     INSERT INTO _astapa_audit_log
@@ -140,6 +141,8 @@ pub async fn persist_audit_log(
             count += 1;
         }
     }
+
+    transaction.commit().await?;
 
     info!(
         session_id = %session_id,
