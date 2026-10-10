@@ -1,4 +1,4 @@
-# Marlobu Roadmap
+# Astapa Roadmap
 
 ## Current State (v0.1 - Proof of Concept)
 - [x] Wire protocol proxy (TCP, message parsing)
@@ -64,7 +64,7 @@
 ## Phase 4: Production Hardening (v0.5) ✅
 *Ready for real workloads*
 
-- [x] **Connection pooling** — PgBouncer compatibility via SET marlobu.session (PR #15)
+- [x] **Connection pooling** — PgBouncer compatibility via SET astapa.session (PR #15)
 - [x] **Performance** — LRU query cache, parallel infra creation, 16KB buffers (PR #19)
 - [x] **Sequence handling** — Prevent ID collisions on approval (PR #14)
 - [x] **Foreign keys** — Validate constraints at approval time (PR #15)
@@ -90,9 +90,9 @@
 - [x] **Pre-push hooks** — Local CI checks before push
 - [x] **GitHub Release** — Tag v0.5.0, release notes
 - [ ] **Docker image** — Published to ghcr.io
-- [ ] **crates.io** — `cargo install marlobu-proxy`
+- [ ] **crates.io** — `cargo install astapa`
 - [ ] **GitHub Release binaries** — Cross-compiled Linux/macOS/Windows via CI
-- [ ] **Homebrew tap** — `brew install marlobu-proxy`
+- [ ] **Homebrew tap** — `brew install astapa`
 
 **Status:** v0.5.0 released. Repo is public.
 
@@ -103,14 +103,14 @@
 
 ### Overview
 
-Marlobu supports two operational modes to cover different use cases:
+Astapa supports two operational modes to cover different use cases:
 
 | Mode | Behavior | Use Case |
 |------|----------|----------|
 | **WIPER** | Staged → discarded | Dev/testing, disposable sandbox |
 | **AGENTIC** | Staged → human approval → apply | Production agents, data ops |
 
-Both modes use shadow tables for complete isolation. Marlobu strictly owns safety and staging — there is no passthrough mode.
+Both modes use shadow tables for complete isolation. Astapa strictly owns safety and staging — there is no passthrough mode.
 
 ### WIPER_MODE (Default for development)
 
@@ -144,8 +144,8 @@ postgresql://user:pass@proxy:5433/db?mode=agentic
 ```
 
 **2. Environment variable defaults**
-- `MARLOBU_DEFAULT_MODE=wiper` for local/dev
-- `MARLOBU_DEFAULT_MODE=agentic` for production
+- `ASTAPA_DEFAULT_MODE=wiper` for local/dev
+- `ASTAPA_DEFAULT_MODE=agentic` for production
 
 **3. MCP server mode awareness**
 - Mode passed in tool descriptions
@@ -186,11 +186,11 @@ postgresql://user:pass@proxy:5433/db?mode=agentic
 ## Phase 6: Ecosystem & Cloud (v1.0)
 *Moat through integration*
 
-- [ ] **Hosted offering** — marlobu.io managed service
+- [ ] **Hosted offering** — astapa.io managed service
 - [ ] **Supabase integration** — Plugin/extension
 - [ ] **Neon integration** — Branching comparison/complement
 - [ ] **ORM adapters** — Prisma, Drizzle, SQLAlchemy plugins
-- [ ] **CLI tool** — `marlobu create`, `marlobu approve`, `marlobu diff`
+- [ ] **CLI tool** — `astapa create`, `astapa approve`, `astapa diff`
 - [ ] **VS Code extension** — Visual diff, approve from IDE
 - [ ] **GitHub Action** — CI/CD integration for schema changes
 
@@ -215,7 +215,7 @@ postgresql://user:pass@proxy:5433/db?mode=agentic
 
 ## Competitive Positioning
 
-| Approach | Marlobu | Neon Branching | Manual Staging DB |
+| Approach | Astapa | Neon Branching | Manual Staging DB |
 |----------|---------|----------------|-------------------|
 | Setup time | Seconds | Minutes | Hours/Days |
 | Storage cost | Delta only | Full copy | Full copy |

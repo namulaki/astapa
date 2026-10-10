@@ -1,11 +1,11 @@
-# Marlobu Node.js SDK
+# Astapa Node.js SDK
 
-Node.js/TypeScript SDK for [marlobu-proxy](https://github.com/anthropics/marlobu-proxy) — a PostgreSQL change staging and review system.
+Node.js/TypeScript SDK for [astapa](https://github.com/anthropics/astapa) — a PostgreSQL change staging and review system.
 
 ## Installation
 
 ```bash
-npm install marlobu pg
+npm install astapa pg
 ```
 
 Requires Node.js 18+ (uses native fetch).
@@ -13,10 +13,10 @@ Requires Node.js 18+ (uses native fetch).
 ## Quick Start
 
 ```typescript
-import { Marlobu } from 'marlobu';
+import { Astapa } from 'astapa';
 
 // Initialize client
-const client = new Marlobu({
+const client = new Astapa({
   apiUrl: 'http://localhost:8080',
   proxyHost: 'localhost',
   proxyPort: 5433,
@@ -53,13 +53,13 @@ await session.destroy();
 
 ## API Reference
 
-### `Marlobu`
+### `Astapa`
 
-Main client for interacting with marlobu-proxy.
+Main client for interacting with astapa.
 
 ```typescript
-const client = new Marlobu({
-  apiUrl: 'http://localhost:8080', // Required: marlobu-proxy API URL
+const client = new Astapa({
+  apiUrl: 'http://localhost:8080', // Required: astapa API URL
   proxyHost: 'localhost',          // Optional: PostgreSQL proxy host (default: 'localhost')
   proxyPort: 5433,                 // Optional: PostgreSQL proxy port (default: 5433)
 });
@@ -72,7 +72,7 @@ const client = new Marlobu({
 
 ### `Session`
 
-Represents an active marlobu session.
+Represents an active astapa session.
 
 #### Properties
 
@@ -99,7 +99,7 @@ const config = session.connectionConfig({
   user: 'postgres',
   password: 'secret',
 });
-// config.options contains `-c marlobu_session=<id>`
+// config.options contains `-c astapa_session=<id>`
 ```
 
 ##### Review Changes
@@ -129,7 +129,7 @@ await session.refresh();  // Refresh session details from server
 The session ID is passed to PostgreSQL via the options parameter:
 
 ```
--c marlobu_session=<session_id>
+-c astapa_session=<session_id>
 ```
 
 This allows the proxy to route queries to the correct staging schema.
@@ -152,7 +152,7 @@ Full TypeScript types are included:
 
 ```typescript
 import type {
-  MarlobuConfig,
+  AstapaConfig,
   CreateSessionOptions,
   SessionDetails,
   SessionStatus,
@@ -161,7 +161,7 @@ import type {
   TableDiff,
   MutationsResponse,
   Mutation,
-} from 'marlobu';
+} from 'astapa';
 ```
 
 ## License

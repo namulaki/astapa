@@ -1,7 +1,7 @@
-"""Basic Marlobu session example."""
+"""Basic Astapa session example."""
 
 import os
-from marlobu import Marlobu
+from astapa import Astapa
 
 required = ["DATABASE_NAME", "DATABASE_USER", "DATABASE_PASSWORD"]
 missing = [k for k in required if not os.environ.get(k)]
@@ -9,10 +9,10 @@ if missing:
     print(f"Missing environment variables: {', '.join(missing)}")
     exit(1)
 
-client = Marlobu(
-    api_url=os.getenv("MARLOBU_API_URL", "http://localhost:8080"),
-    proxy_host=os.getenv("MARLOBU_PROXY_HOST", "localhost"),
-    proxy_port=int(os.getenv("MARLOBU_PROXY_PORT", "5433")),
+client = Astapa(
+    api_url=os.getenv("ASTAPA_API_URL", "http://localhost:8080"),
+    proxy_host=os.getenv("ASTAPA_PROXY_HOST", "localhost"),
+    proxy_port=int(os.getenv("ASTAPA_PROXY_PORT", "5433")),
 )
 
 # Create a session

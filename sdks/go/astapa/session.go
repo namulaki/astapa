@@ -1,4 +1,4 @@
-package marlobu
+package astapa
 
 import (
 	"context"
@@ -17,12 +17,12 @@ type SessionHandle struct {
 }
 
 // ConnectionString returns a PostgreSQL connection string configured for this session.
-// The connection string includes the marlobu_session option to route queries through
+// The connection string includes the astapa_session option to route queries through
 // the session's shadow schema.
 func (s *SessionHandle) ConnectionString(database, user, password string) string {
 	// Build connection string with session context via options parameter
 	connStr := fmt.Sprintf(
-		"host=%s port=%d dbname=%s user=%s password=%s sslmode=disable options='-c marlobu_session=%s'",
+		"host=%s port=%d dbname=%s user=%s password=%s sslmode=disable options='-c astapa_session=%s'",
 		s.client.proxyHost,
 		s.client.proxyPort,
 		database,
@@ -36,7 +36,7 @@ func (s *SessionHandle) ConnectionString(database, user, password string) string
 // ConnectionStringURL returns the connection string in URL format.
 func (s *SessionHandle) ConnectionStringURL(database, user, password string) string {
 	// URL-encode the options parameter
-	options := url.QueryEscape(fmt.Sprintf("-c marlobu_session=%s", s.ID))
+	options := url.QueryEscape(fmt.Sprintf("-c astapa_session=%s", s.ID))
 	return fmt.Sprintf(
 		"postgres://%s:%s@%s:%d/%s?sslmode=disable&options=%s",
 		user,

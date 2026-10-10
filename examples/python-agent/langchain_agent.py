@@ -1,4 +1,4 @@
-"""LangChain agent with Marlobu database tools."""
+"""LangChain agent with Astapa database tools."""
 
 import json
 import os
@@ -7,12 +7,12 @@ from langchain.tools import tool
 from langchain_openai import ChatOpenAI
 from langchain.agents import create_openai_tools_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate
-from marlobu import Marlobu
+from astapa import Astapa
 
-marlobu = Marlobu(
-    api_url=os.getenv("MARLOBU_API_URL", "http://localhost:8080"),
-    proxy_host=os.getenv("MARLOBU_PROXY_HOST", "localhost"),
-    proxy_port=int(os.getenv("MARLOBU_PROXY_PORT", "5433")),
+astapa = Astapa(
+    api_url=os.getenv("ASTAPA_API_URL", "http://localhost:8080"),
+    proxy_host=os.getenv("ASTAPA_PROXY_HOST", "localhost"),
+    proxy_port=int(os.getenv("ASTAPA_PROXY_PORT", "5433")),
 )
 session = None  # Set when running
 
@@ -70,7 +70,7 @@ def mutate(sql: str) -> str:
 
 
 def run_agent(user_input: str):
-    """Run the LangChain agent with a Marlobu session."""
+    """Run the LangChain agent with a Astapa session."""
     global session
 
     required = ["DATABASE_NAME", "DATABASE_USER", "DATABASE_PASSWORD", "OPENAI_API_KEY"]
@@ -91,7 +91,7 @@ def run_agent(user_input: str):
     agent = create_openai_tools_agent(llm, tools, prompt)
     executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
-    with marlobu.session(
+    with astapa.session(
         project_id="langchain-agent",
         database=os.environ["DATABASE_NAME"],
         user=os.environ["DATABASE_USER"],

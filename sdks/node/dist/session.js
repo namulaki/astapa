@@ -7,7 +7,7 @@ async function parseErrorBody(response) {
     return response.json().catch(() => ({ error: 'Unknown error' }));
 }
 /**
- * Represents an active marlobu session.
+ * Represents an active astapa session.
  * Provides methods to interact with the session and create PostgreSQL connections.
  */
 class Session {
@@ -68,7 +68,7 @@ class Session {
             database: options.database,
             user: options.user,
             password: options.password,
-            options: `-c marlobu_session=${this.id}`,
+            options: `-c astapa_session=${this.id}`,
         };
     }
     /**
@@ -82,7 +82,7 @@ class Session {
             database: options.database,
             user: options.user,
             password: options.password,
-            options: `-c marlobu_session=${this.id}`,
+            options: `-c astapa_session=${this.id}`,
         };
         const pool = new pg_1.Pool(config);
         this.pools.push(pool);

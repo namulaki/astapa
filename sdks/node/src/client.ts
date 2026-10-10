@@ -1,23 +1,23 @@
 import { Session } from './session.js';
-import type { MarlobuConfig, CreateSessionOptions, SessionDetails } from './types.js';
+import type { AstapaConfig, CreateSessionOptions, SessionDetails } from './types.js';
 
 /**
- * Main client for interacting with the marlobu-proxy service.
+ * Main client for interacting with the astapa service.
  */
-export class Marlobu {
+export class Astapa {
   private readonly apiUrl: string;
   private readonly proxyHost: string;
   private readonly proxyPort: number;
 
   /**
-   * Create a new Marlobu client.
+   * Create a new Astapa client.
    *
    * @param config - Client configuration
-   * @param config.apiUrl - Base URL for the marlobu-proxy API
+   * @param config.apiUrl - Base URL for the astapa API
    * @param config.proxyHost - Hostname of the PostgreSQL proxy (default: 'localhost')
    * @param config.proxyPort - Port of the PostgreSQL proxy (default: 5433)
    */
-  constructor(config: MarlobuConfig) {
+  constructor(config: AstapaConfig) {
     this.apiUrl = config.apiUrl.replace(/\/$/, ''); // Remove trailing slash
     this.proxyHost = config.proxyHost ?? 'localhost';
     this.proxyPort = config.proxyPort ?? 5433;

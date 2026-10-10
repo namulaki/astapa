@@ -1,7 +1,7 @@
 {
-  "name": "marlobu",
+  "name": "astapa",
   "version": "0.1.0",
-  "description": "Node.js SDK for marlobu-proxy - PostgreSQL change staging and review",
+  "description": "Node.js SDK for astapa - PostgreSQL change staging and review",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -17,7 +17,7 @@
     "database",
     "staging",
     "review",
-    "marlobu"
+    "astapa"
   ],
   "license": "MIT",
   "engines": {

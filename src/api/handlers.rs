@@ -173,7 +173,7 @@ pub async fn create_session(
             mode: session.mode.as_str().to_string(),
             expires_at: session.expires_at,
             connection_string: format!(
-                "postgresql://postgres:postgres@localhost:5433/marlobu_playground?options=-c%20marlobu_session%3D{}",
+                "postgresql://postgres:postgres@localhost:5433/astapa_playground?options=-c%20astapa_session%3D{}",
                 session.id
             ),
         }),

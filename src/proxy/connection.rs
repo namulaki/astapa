@@ -56,7 +56,7 @@ pub struct Connection {
     schema_manager: SchemaManager,
     /// Session manager for wiper cleanup
     session_manager: Option<Arc<SessionManager>>,
-    /// Session ID extracted from marlobu_session parameter
+    /// Session ID extracted from astapa_session parameter
     session_id: Option<Uuid>,
     /// Session mode (wiper or agentic)
     session_mode: Option<SessionMode>,
@@ -192,26 +192,26 @@ impl Connection {
     fn process_startup(&mut self, startup: StartupMessage) -> anyhow::Result<()> {
         self.startup_params = startup.parameters.clone();
 
-        // Extract marlobu_session - check direct parameter first
+        // Extract astapa_session - check direct parameter first
         let session_str = startup
             .parameters
-            .get("marlobu_session")
+            .get("astapa_session")
             .cloned()
             .or_else(|| {
-                // Check inside options parameter: "-c marlobu_session=uuid"
+                // Check inside options parameter: "-c astapa_session=uuid"
                 startup
                     .parameters
                     .get("options")
-                    .and_then(|opts| extract_option_value(opts, "marlobu_session"))
+                    .and_then(|opts| extract_option_value(opts, "astapa_session"))
             });
 
-        // Extract marlobu_mode - check direct parameter first
-        let mode_str = startup.parameters.get("marlobu_mode").cloned().or_else(|| {
-            // Check inside options parameter: "-c marlobu_mode=wiper"
+        // Extract astapa_mode - check direct parameter first
+        let mode_str = startup.parameters.get("astapa_mode").cloned().or_else(|| {
+            // Check inside options parameter: "-c astapa_mode=wiper"
             startup
                 .parameters
                 .get("options")
-                .and_then(|opts| extract_option_value(opts, "marlobu_mode"))
+                .and_then(|opts| extract_option_value(opts, "astapa_mode"))
         });
 
         // Parse mode (defaults to Agentic if not specified)
@@ -250,15 +250,15 @@ impl Connection {
         let backend = TcpStream::connect(&self.backend_addr).await?;
         self.backend = Some(backend);
 
-        // Send startup message to backend (without marlobu_session and marlobu_mode params)
+        // Send startup message to backend (without astapa_session and astapa_mode params)
         let mut backend_params = self.startup_params.clone();
-        backend_params.remove("marlobu_session");
-        backend_params.remove("marlobu_mode");
+        backend_params.remove("astapa_session");
+        backend_params.remove("astapa_mode");
 
-        // Also strip marlobu_session and marlobu_mode from options parameter if present
+        // Also strip astapa_session and astapa_mode from options parameter if present
         if let Some(opts) = backend_params.get("options").cloned() {
-            let cleaned = strip_option_value(&opts, "marlobu_session");
-            let cleaned = strip_option_value(&cleaned, "marlobu_mode");
+            let cleaned = strip_option_value(&opts, "astapa_session");
+            let cleaned = strip_option_value(&cleaned, "astapa_mode");
             if cleaned.trim().is_empty() {
                 backend_params.remove("options");
             } else {
@@ -469,16 +469,16 @@ impl Connection {
         Ok(())
     }
 
-    /// Check if query is a session switch command (SET marlobu.session)
+    /// Check if query is a session switch command (SET astapa.session)
     /// Returns Some((new_session_id, rest_of_query)) if it's a session switch, None otherwise
     fn parse_session_switch(&self, query: &str) -> Option<(Option<Uuid>, Option<String>)> {
         let trimmed = query.trim();
         let upper = trimmed.to_uppercase();
 
-        // Handle: SET marlobu.session TO 'uuid' or SET marlobu.session = 'uuid'
-        if upper.starts_with("SET MARLOBU.SESSION") || upper.starts_with("SET MARLOBU_SESSION") {
+        // Handle: SET astapa.session TO 'uuid' or SET astapa.session = 'uuid'
+        if upper.starts_with("SET ASTAPA.SESSION") || upper.starts_with("SET ASTAPA_SESSION") {
             // Find the value - it's quoted
-            let after_set = &trimmed[19..]; // Skip "SET marlobu.session" or "SET marlobu_session"
+            let after_set = &trimmed[19..]; // Skip "SET astapa.session" or "SET astapa_session"
 
             // Find the quoted value
             if let Some(quote_start) = after_set.find('\'').or_else(|| after_set.find('"')) {
@@ -513,10 +513,9 @@ impl Connection {
             return Some((None, None)); // Malformed = clear session
         }
 
-        // Handle: RESET marlobu.session
-        if upper.starts_with("RESET MARLOBU.SESSION") || upper.starts_with("RESET MARLOBU_SESSION")
-        {
-            let rest = trimmed[21..].trim(); // Skip "RESET marlobu.session"
+        // Handle: RESET astapa.session
+        if upper.starts_with("RESET ASTAPA.SESSION") || upper.starts_with("RESET ASTAPA_SESSION") {
+            let rest = trimmed[21..].trim(); // Skip "RESET astapa.session"
             let remaining = if rest.starts_with(';') {
                 let after_semi = rest[1..].trim();
                 if after_semi.is_empty() {
@@ -847,7 +846,7 @@ impl Connection {
             client
                 .execute(
                     r#"
-                    UPDATE _marlobu_sessions
+                    UPDATE _astapa_sessions
                     SET tables = jsonb_set(
                         COALESCE(tables, '{}'::jsonb),
                         $2::text[],
@@ -922,7 +921,7 @@ impl Connection {
         client
             .execute(
                 r#"
-                UPDATE _marlobu_sessions
+                UPDATE _astapa_sessions
                 SET tables = jsonb_set(
                     COALESCE(tables, '{}'::jsonb),
                     $2::text[],
@@ -1018,9 +1017,9 @@ mod tests {
 
     #[test]
     fn test_extract_option_value() {
-        let opts = "-c marlobu_session=abc-123 -c other=xyz";
+        let opts = "-c astapa_session=abc-123 -c other=xyz";
         assert_eq!(
-            extract_option_value(opts, "marlobu_session"),
+            extract_option_value(opts, "astapa_session"),
             Some("abc-123".to_string())
         );
         assert_eq!(extract_option_value(opts, "other"), Some("xyz".to_string()));
@@ -1029,11 +1028,11 @@ mod tests {
 
     #[test]
     fn test_strip_option_value() {
-        let opts = "-c marlobu_session=abc-123 -c other=xyz";
-        assert_eq!(strip_option_value(opts, "marlobu_session"), "-c other=xyz");
+        let opts = "-c astapa_session=abc-123 -c other=xyz";
+        assert_eq!(strip_option_value(opts, "astapa_session"), "-c other=xyz");
 
-        let opts2 = "-c marlobu_session=abc-123";
-        assert_eq!(strip_option_value(opts2, "marlobu_session"), "");
+        let opts2 = "-c astapa_session=abc-123";
+        assert_eq!(strip_option_value(opts2, "astapa_session"), "");
     }
 
     #[test]

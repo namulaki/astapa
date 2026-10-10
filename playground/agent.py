@@ -1,7 +1,7 @@
 """
-Marlobu SQL Agent - LangChain integration for sandboxed database operations.
+Astapa SQL Agent - LangChain integration for sandboxed database operations.
 
-All queries run through the marlobu proxy, isolating changes to a session.
+All queries run through the astapa proxy, isolating changes to a session.
 Changes can be reviewed and approved/rejected before hitting production.
 """
 
@@ -16,10 +16,10 @@ from langchain_openai import ChatOpenAI
 
 load_dotenv()
 
-MARLOBU_API = os.getenv("MARLOBU_API_URL", "http://localhost:8080")
-MARLOBU_PROXY = os.getenv("MARLOBU_PROXY_HOST", "localhost")
-MARLOBU_PROXY_PORT = os.getenv("MARLOBU_PROXY_PORT", "5433")
-DATABASE_NAME = os.getenv("DATABASE_NAME", "marlobu_playground")
+ASTAPA_API = os.getenv("ASTAPA_API_URL", "http://localhost:8080")
+ASTAPA_PROXY = os.getenv("ASTAPA_PROXY_HOST", "localhost")
+ASTAPA_PROXY_PORT = os.getenv("ASTAPA_PROXY_PORT", "5433")
+DATABASE_NAME = os.getenv("DATABASE_NAME", "astapa_playground")
 DATABASE_USER = os.getenv("DATABASE_USER", "postgres")
 DATABASE_PASSWORD = os.getenv("DATABASE_PASSWORD", "")
 
@@ -31,8 +31,8 @@ if LLM_BASE_URL and not LLM_BASE_URL.endswith("/v1"):
 LLM_MODEL = os.getenv("LLM_MODEL", "claude-sonnet-4-20250514")
 
 
-class MarlobuSession:
-    """Manages a marlobu session with create/approve/reject lifecycle."""
+class AstapaSession:
+    """Manages a astapa session with create/approve/reject lifecycle."""
 
     def __init__(self, project_id: str = "langchain-agent"):
         self.project_id = project_id
@@ -42,7 +42,7 @@ class MarlobuSession:
     def create(self) -> str:
         """Create a new session and return session_id."""
         resp = requests.post(
-            f"{MARLOBU_API}/sessions",
+            f"{ASTAPA_API}/sessions",
             json={"project_id": self.project_id}
         )
         resp.raise_for_status()
@@ -54,32 +54,32 @@ class MarlobuSession:
 
     def get_status(self) -> dict:
         """Get current session status."""
-        resp = requests.get(f"{MARLOBU_API}/sessions/{self.session_id}")
+        resp = requests.get(f"{ASTAPA_API}/sessions/{self.session_id}")
         resp.raise_for_status()
         return resp.json()
 
     def get_diff(self) -> dict:
         """Get staged changes diff."""
-        resp = requests.get(f"{MARLOBU_API}/sessions/{self.session_id}/diff")
+        resp = requests.get(f"{ASTAPA_API}/sessions/{self.session_id}/diff")
         resp.raise_for_status()
         return resp.json()
 
     def propose(self) -> dict:
         """Submit session for review."""
-        resp = requests.post(f"{MARLOBU_API}/sessions/{self.session_id}/propose")
+        resp = requests.post(f"{ASTAPA_API}/sessions/{self.session_id}/propose")
         resp.raise_for_status()
         return resp.json()
 
     def approve(self) -> dict:
         """Approve and apply changes to production."""
         self.propose()
-        resp = requests.post(f"{MARLOBU_API}/sessions/{self.session_id}/approve")
+        resp = requests.post(f"{ASTAPA_API}/sessions/{self.session_id}/approve")
         resp.raise_for_status()
         return resp.json()
 
     def reject(self) -> dict:
         """Reject and discard changes."""
-        resp = requests.post(f"{MARLOBU_API}/sessions/{self.session_id}/reject")
+        resp = requests.post(f"{ASTAPA_API}/sessions/{self.session_id}/reject")
         resp.raise_for_status()
         return resp.json()
 
@@ -87,21 +87,21 @@ class MarlobuSession:
         """Get SQLAlchemy connection string through proxy."""
         return (
             f"postgresql://{DATABASE_USER}:{DATABASE_PASSWORD}"
-            f"@{MARLOBU_PROXY}:{MARLOBU_PROXY_PORT}/{DATABASE_NAME}"
+            f"@{ASTAPA_PROXY}:{ASTAPA_PROXY_PORT}/{DATABASE_NAME}"
         )
 
     def get_connect_args(self) -> dict:
         """Get connection args with session ID."""
-        return {"options": f"-c marlobu_session={self.session_id}"}
+        return {"options": f"-c astapa_session={self.session_id}"}
 
 
-def create_marlobu_agent(
-    session: MarlobuSession,
+def create_astapa_agent(
+    session: AstapaSession,
     model: str = None,
     temperature: float = 0,
     verbose: bool = True
 ):
-    """Create a LangChain SQL agent connected through marlobu proxy."""
+    """Create a LangChain SQL agent connected through astapa proxy."""
 
     if not session.session_id:
         session.create()
@@ -137,15 +137,15 @@ Always explain what you did after completing a task."""
 def interactive_session():
     """Run an interactive session with the agent."""
     print("=" * 60)
-    print("Marlobu Playground - Sandboxed Database Assistant")
+    print("Astapa Playground - Sandboxed Database Assistant")
     print("Powered by LangChain SQL Agent")
     print("=" * 60)
     print()
 
-    session = MarlobuSession()
+    session = AstapaSession()
     session.create()
 
-    agent = create_marlobu_agent(session, verbose=False)
+    agent = create_astapa_agent(session, verbose=False)
 
     print(f"Session ID: {session.session_id}")
     print("All changes are sandboxed. Type 'approve' to apply, 'reject' to discard.")

@@ -116,7 +116,7 @@ async fn send_webhook(
     // Add signature if secret is configured
     if let Some(secret) = secret {
         let signature = compute_signature(&payload, secret);
-        request = request.header("X-Marlobu-Signature", format!("sha256={}", signature));
+        request = request.header("X-Astapa-Signature", format!("sha256={}", signature));
     }
 
     let response = request.send().await?;

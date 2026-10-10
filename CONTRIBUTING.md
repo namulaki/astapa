@@ -1,11 +1,11 @@
-# Contributing to Marlobu
+# Contributing to Astapa
 
 Thanks for your interest in contributing!
 
 ## Getting Started
 
 1. Fork the repository
-2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/marlobu-proxy.git`
+2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/astapa.git`
 3. Create a branch: `git checkout -b my-feature`
 4. Make your changes
 5. Run tests: `cargo test`

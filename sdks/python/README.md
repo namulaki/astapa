@@ -1,26 +1,26 @@
-# Marlobu Python SDK
+# Astapa Python SDK
 
-Python SDK for the Marlobu proxy - database change management with review workflows.
+Python SDK for the Astapa proxy - database change management with review workflows.
 
 ## Installation
 
 ```bash
-pip install marlobu
+pip install astapa
 ```
 
 Or from source:
 
 ```bash
-pip install -e /path/to/marlobu-proxy/sdks/python
+pip install -e /path/to/astapa/sdks/python
 ```
 
 ## Quick Start
 
 ```python
-from marlobu import Marlobu
+from astapa import Astapa
 
 # Initialize client
-client = Marlobu(
+client = Astapa(
     api_url="http://localhost:8080",
     proxy_host="localhost",
     proxy_port=5433,
@@ -66,13 +66,13 @@ session.approve()
 
 ## API Reference
 
-### Marlobu
+### Astapa
 
 Main client class.
 
 ```python
-client = Marlobu(
-    api_url="http://localhost:8080",  # Marlobu API URL
+client = Astapa(
+    api_url="http://localhost:8080",  # Astapa API URL
     proxy_host="localhost",            # PostgreSQL proxy host
     proxy_port=5433,                   # PostgreSQL proxy port
     timeout=30.0,                      # HTTP request timeout
@@ -87,7 +87,7 @@ client = Marlobu(
 
 ### Session
 
-Represents a Marlobu session.
+Represents a Astapa session.
 
 **Properties:**
 
@@ -115,7 +115,7 @@ If you prefer using your own database library, get a connection string:
 ```python
 session = client.create_session(project_id="my-project")
 conn_str = session.connection_string(database="mydb", user="user", password="pass")
-# postgresql://user:pass@localhost:5433/mydb?options=-c%20marlobu_session%3D<session-id>
+# postgresql://user:pass@localhost:5433/mydb?options=-c%20astapa_session%3D<session-id>
 ```
 
 ## Requirements

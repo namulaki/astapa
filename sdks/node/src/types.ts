@@ -1,10 +1,10 @@
 /**
- * Marlobu SDK Types
+ * Astapa SDK Types
  */
 
-/** Configuration for the Marlobu client */
-export interface MarlobuConfig {
-  /** Base URL for the marlobu-proxy API (e.g., 'http://localhost:8080') */
+/** Configuration for the Astapa client */
+export interface AstapaConfig {
+  /** Base URL for the astapa API (e.g., 'http://localhost:8080') */
   apiUrl: string;
   /** Hostname of the PostgreSQL proxy (default: 'localhost') */
   proxyHost?: string;
@@ -43,7 +43,7 @@ export interface ConnectionConfig {
   options: string;
 }
 
-/** Base connection options (without marlobu-specific settings) */
+/** Base connection options (without astapa-specific settings) */
 export interface BaseConnectionOptions {
   database: string;
   user: string;

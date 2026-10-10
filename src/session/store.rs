@@ -49,7 +49,7 @@ impl SessionStore {
         client
             .execute(
                 r#"
-                CREATE TABLE IF NOT EXISTS _marlobu_sessions (
+                CREATE TABLE IF NOT EXISTS _astapa_sessions (
                     id UUID PRIMARY KEY,
                     project_id TEXT NOT NULL,
                     schema_name TEXT NOT NULL,
@@ -68,7 +68,7 @@ impl SessionStore {
         client
             .execute(
                 r#"
-                ALTER TABLE _marlobu_sessions
+                ALTER TABLE _astapa_sessions
                 ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'agentic'
                 "#,
                 &[],
@@ -77,14 +77,14 @@ impl SessionStore {
 
         client
             .execute(
-                "CREATE INDEX IF NOT EXISTS idx_sessions_project ON _marlobu_sessions(project_id)",
+                "CREATE INDEX IF NOT EXISTS idx_sessions_project ON _astapa_sessions(project_id)",
                 &[],
             )
             .await?;
 
         client
             .execute(
-                "CREATE INDEX IF NOT EXISTS idx_sessions_expires ON _marlobu_sessions(expires_at)",
+                "CREATE INDEX IF NOT EXISTS idx_sessions_expires ON _astapa_sessions(expires_at)",
                 &[],
             )
             .await?;
@@ -103,7 +103,7 @@ impl SessionStore {
         client
             .execute(
                 r#"
-                INSERT INTO _marlobu_sessions (id, project_id, schema_name, status, mode, created_at, expires_at, tables)
+                INSERT INTO _astapa_sessions (id, project_id, schema_name, status, mode, created_at, expires_at, tables)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 "#,
                 &[
@@ -156,7 +156,7 @@ impl SessionStore {
             .query_opt(
                 r#"
                 SELECT id, project_id, schema_name, status, mode, created_at, expires_at, tables
-                FROM _marlobu_sessions
+                FROM _astapa_sessions
                 WHERE id = $1
                 "#,
                 &[&id],
@@ -177,7 +177,7 @@ impl SessionStore {
         client
             .execute(
                 r#"
-                UPDATE _marlobu_sessions
+                UPDATE _astapa_sessions
                 SET status = $2, tables = $3, expires_at = $4
                 WHERE id = $1
                 "#,
@@ -197,7 +197,7 @@ impl SessionStore {
         let client = self.pool.get().await?;
 
         client
-            .execute("DELETE FROM _marlobu_sessions WHERE id = $1", &[&id])
+            .execute("DELETE FROM _astapa_sessions WHERE id = $1", &[&id])
             .await?;
 
         // Remove from cache
@@ -215,7 +215,7 @@ impl SessionStore {
             .query(
                 r#"
                 SELECT id, project_id, schema_name, status, mode, created_at, expires_at, tables
-                FROM _marlobu_sessions
+                FROM _astapa_sessions
                 WHERE project_id = $1
                 ORDER BY created_at DESC
                 "#,
@@ -235,7 +235,7 @@ impl SessionStore {
             .query(
                 r#"
                 SELECT id, project_id, schema_name, status, mode, created_at, expires_at, tables
-                FROM _marlobu_sessions
+                FROM _astapa_sessions
                 WHERE expires_at < $1 AND status = 'active'
                 "#,
                 &[&now],
@@ -254,7 +254,7 @@ impl SessionStore {
             .query(
                 r#"
                 SELECT id, project_id, schema_name, status, mode, created_at, expires_at, tables
-                FROM _marlobu_sessions
+                FROM _astapa_sessions
                 WHERE (expires_at < $1 AND status IN ('active', 'pending_review'))
                    OR status IN ('expired', 'rejected')
                 "#,

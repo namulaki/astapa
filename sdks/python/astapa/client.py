@@ -1,4 +1,4 @@
-"""Marlobu client for managing database change sessions."""
+"""Astapa client for managing database change sessions."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from .session import Session
 
 
 class SessionContext:
-    """Context manager for a Marlobu session with auto-connection."""
+    """Context manager for a Astapa session with auto-connection."""
 
     def __init__(
         self,
@@ -46,15 +46,15 @@ class SessionContext:
             self._session.propose()
 
 
-class Marlobu:
+class Astapa:
     """
-    Client for interacting with the Marlobu proxy service.
+    Client for interacting with the Astapa proxy service.
 
-    The Marlobu proxy provides isolated database sessions for reviewing
+    The Astapa proxy provides isolated database sessions for reviewing
     changes before applying them to the main database.
 
     Example:
-        client = Marlobu(
+        client = Astapa(
             api_url="http://localhost:8080",
             proxy_host="localhost",
             proxy_port=5433,
@@ -86,10 +86,10 @@ class Marlobu:
         timeout: float = 30.0,
     ) -> None:
         """
-        Initialize the Marlobu client.
+        Initialize the Astapa client.
 
         Args:
-            api_url: Base URL for the Marlobu API
+            api_url: Base URL for the Astapa API
             proxy_host: Hostname for the PostgreSQL proxy
             proxy_port: Port for the PostgreSQL proxy
             timeout: Default timeout for HTTP requests in seconds
@@ -101,7 +101,7 @@ class Marlobu:
 
     def create_session(self, project_id: str) -> Session:
         """
-        Create a new Marlobu session.
+        Create a new Astapa session.
 
         Args:
             project_id: Identifier for the project
@@ -195,7 +195,7 @@ class Marlobu:
 
     def __repr__(self) -> str:
         return (
-            f"Marlobu(api_url={self._api_url!r}, "
+            f"Astapa(api_url={self._api_url!r}, "
             f"proxy_host={self._proxy_host!r}, "
             f"proxy_port={self._proxy_port})"
         )

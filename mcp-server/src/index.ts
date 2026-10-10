@@ -6,7 +6,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { Marlobu, Session } from "marlobu";
+import { Astapa, Session } from "astapa";
 import { Pool } from "pg";
 
 // Proxy modes
@@ -18,19 +18,19 @@ function parseMode(value: string | undefined): Mode {
     return normalized;
   }
   if (normalized !== undefined) {
-    console.error("Error: MARLOBU_MODE must be 'wiper' or 'agentic'");
+    console.error("Error: ASTAPA_MODE must be 'wiper' or 'agentic'");
     process.exit(1);
   }
   return "agentic"; // default
 }
 
-const API_URL = process.env.MARLOBU_API_URL || "http://localhost:8080";
-const PROXY_HOST = process.env.MARLOBU_PROXY_HOST || "localhost";
-const PROXY_PORT = parseInt(process.env.MARLOBU_PROXY_PORT || "5433");
+const API_URL = process.env.ASTAPA_API_URL || "http://localhost:8080";
+const PROXY_HOST = process.env.ASTAPA_PROXY_HOST || "localhost";
+const PROXY_PORT = parseInt(process.env.ASTAPA_PROXY_PORT || "5433");
 const DATABASE = process.env.DATABASE_NAME;
 const USER = process.env.DATABASE_USER;
 const PASSWORD = process.env.DATABASE_PASSWORD;
-const MODE: Mode = parseMode(process.env.MARLOBU_MODE);
+const MODE: Mode = parseMode(process.env.ASTAPA_MODE);
 
 if (!DATABASE || !USER || !PASSWORD) {
   console.error("Error: DATABASE_NAME, DATABASE_USER, and DATABASE_PASSWORD environment variables are required");
@@ -39,10 +39,10 @@ if (!DATABASE || !USER || !PASSWORD) {
 
 const MODE_DESCRIPTIONS: Record<Mode, string> = {
   wiper: "WIPER MODE: All mutations are staged in a sandbox and discarded at session end. Safe for testing.",
-  agentic: "AGENTIC MODE: All mutations are staged for human review. Use marlobu_propose to submit for approval.",
+  agentic: "AGENTIC MODE: All mutations are staged for human review. Use astapa_propose to submit for approval.",
 };
 
-const client = new Marlobu({
+const client = new Astapa({
   apiUrl: API_URL,
   proxyHost: PROXY_HOST,
   proxyPort: PROXY_PORT,
@@ -99,7 +99,7 @@ process.on("SIGTERM", async () => {
 });
 
 const server = new Server(
-  { name: "marlobu", version: "0.1.0" },
+  { name: "astapa", version: "0.1.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -116,7 +116,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     };
   }> = [
     {
-      name: "marlobu_query",
+      name: "astapa_query",
       description: `Execute a SELECT query on the database. Returns query results.\n\n${modeInfo}`,
       inputSchema: {
         type: "object",
@@ -127,7 +127,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
     },
     {
-      name: "marlobu_mutate",
+      name: "astapa_mutate",
       description: MODE === "wiper"
         ? `Execute INSERT, UPDATE, or DELETE. Changes are staged in sandbox and will be discarded at session end.\n\n${modeInfo}`
         : `Execute INSERT, UPDATE, or DELETE. Changes are staged for human review, not applied immediately.\n\n${modeInfo}`,
@@ -143,7 +143,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
   // Both modes have diff tool
   baseTools.push({
-    name: "marlobu_diff",
+    name: "astapa_diff",
     description: `View all pending changes staged in the current session.\n\n${modeInfo}`,
     inputSchema: {
       type: "object",
@@ -154,7 +154,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   // Only include propose tool in agentic mode
   if (MODE === "agentic") {
     baseTools.push({
-      name: "marlobu_propose",
+      name: "astapa_propose",
       description: `Submit all staged changes for human review. After proposing, no more changes can be made.\n\n${modeInfo}`,
       inputSchema: {
         type: "object",
@@ -166,7 +166,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   // Include discard tool in wiper mode
   if (MODE === "wiper") {
     baseTools.push({
-      name: "marlobu_discard",
+      name: "astapa_discard",
       description: `Discard all staged changes and reset the session. Use when you want to start fresh.\n\n${modeInfo}`,
       inputSchema: {
         type: "object",
@@ -193,19 +193,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     switch (name) {
-      case "marlobu_query": {
+      case "astapa_query": {
         const sql = (args as { sql: string }).sql;
         if (classifySQL(sql) !== "select") {
-          return { content: [{ type: "text", text: "Error: Only SELECT queries allowed. Use marlobu_mutate for INSERT/UPDATE/DELETE." }] };
+          return { content: [{ type: "text", text: "Error: Only SELECT queries allowed. Use astapa_mutate for INSERT/UPDATE/DELETE." }] };
         }
         const result = await pool.query(sql);
         return { content: [{ type: "text", text: JSON.stringify(result.rows, null, 2) }] };
       }
 
-      case "marlobu_mutate": {
+      case "astapa_mutate": {
         const sql = (args as { sql: string }).sql;
         if (classifySQL(sql) !== "mutate") {
-          return { content: [{ type: "text", text: "Error: Only INSERT/UPDATE/DELETE allowed. Use marlobu_query for SELECT." }] };
+          return { content: [{ type: "text", text: "Error: Only INSERT/UPDATE/DELETE allowed. Use astapa_query for SELECT." }] };
         }
         const result = await pool.query(sql);
 
@@ -216,7 +216,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
       }
 
-      case "marlobu_diff": {
+      case "astapa_diff": {
         if (!session) {
           return { content: [{ type: "text", text: "No active session. Run a query or mutation first." }] };
         }
@@ -227,7 +227,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: [{ type: "text", text: JSON.stringify(diff, null, 2) }] };
       }
 
-      case "marlobu_propose": {
+      case "astapa_propose": {
         if (MODE !== "agentic") {
           return { content: [{ type: "text", text: `Error: Propose is only available in agentic mode. Current mode: ${MODE}` }] };
         }
@@ -244,7 +244,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: [{ type: "text", text: `Session ${sessionId} proposed for review. Session closed.` }] };
       }
 
-      case "marlobu_discard": {
+      case "astapa_discard": {
         if (MODE !== "wiper") {
           return { content: [{ type: "text", text: `Error: Discard is only available in wiper mode. Current mode: ${MODE}` }] };
         }
@@ -267,7 +267,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(`Marlobu MCP server running in ${MODE.toUpperCase()} mode`);
+  console.error(`Astapa MCP server running in ${MODE.toUpperCase()} mode`);
 }
 
 main().catch(console.error);

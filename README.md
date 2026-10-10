@@ -17,7 +17,7 @@
 
 ## Overview
 
-marlobu-proxy sits between your application and PostgreSQL, intercepting queries and routing them through isolated sessions. Within a session:
+astapa sits between your application and PostgreSQL, intercepting queries and routing them through isolated sessions. Within a session:
 
 - **Reads** see the original data plus any uncommitted changes
 - **Writes** go to shadow tables, leaving production data untouched
@@ -27,7 +27,7 @@ This enables workflows like data review, staging environments, and safe bulk ope
 
 ## Use cases
 
-| Scenario | How marlobu helps |
+| Scenario | How astapa helps |
 |----------|-------------------|
 | **Data review** | Analysts modify data in isolation; reviewers approve before production |
 | **Safe bulk operations** | Run large UPDATE/DELETE, verify results, then apply |
@@ -47,14 +47,14 @@ This enables workflows like data review, staging environments, and safe bulk ope
 
 ```bash
 # Via crates.io
-cargo install marlobu-proxy
+cargo install astapa
 
 # Via Docker
-docker pull ghcr.io/aprdos/marlobu-proxy
+docker pull ghcr.io/aprdos/astapa
 
 # From source
-git clone https://github.com/aprdos/marlobu-proxy.git
-cd marlobu-proxy
+git clone https://github.com/namulaki/astapa.git
+cd astapa
 cargo build --release
 ```
 
@@ -62,19 +62,19 @@ cargo build --release
 
 ```bash
 # Node.js
-npm install marlobu
+npm install astapa
 
 # Python
-pip install marlobu
+pip install astapa
 
 # Go
-go get github.com/aprdos/marlobu-proxy/sdks/go/marlobu
+go get github.com/namulaki/astapa/sdks/go/astapa
 ```
 
 **MCP Server** (for Claude Code integration)
 
 ```bash
-npm install -g @marlobu/mcp-server
+npm install -g @astapa/mcp-server
 ```
 
 ### Configuration
@@ -89,14 +89,14 @@ export API_ADDR=0.0.0.0:8080          # HTTP API
 export SESSION_TTL_SECONDS=3600       # 1 hour
 
 # Webhooks (optional)
-export WEBHOOK_URL=https://your-app.com/hooks/marlobu
+export WEBHOOK_URL=https://your-app.com/hooks/astapa
 export WEBHOOK_SECRET=your-hmac-secret
 ```
 
 ### Run
 
 ```bash
-./target/release/marlobu-proxy
+./target/release/astapa
 ```
 
 ### Basic workflow
@@ -108,7 +108,7 @@ SESSION_ID=$(curl -s -X POST http://localhost:8080/sessions \
   -d '{"project_id": "my-project"}' | jq -r '.id')
 
 # 2. Connect through the proxy with session context
-psql "host=localhost port=5433 dbname=mydb options='-c marlobu_session=$SESSION_ID'"
+psql "host=localhost port=5433 dbname=mydb options='-c astapa_session=$SESSION_ID'"
 
 # 3. Make changes (isolated to this session)
 UPDATE users SET status = 'inactive' WHERE last_login < '2024-01-01';
@@ -128,7 +128,7 @@ flowchart LR
         A[psql / app / ORM]
     end
     
-    subgraph marlobu-proxy
+    subgraph astapa
         B[SQL Parser] --> C[Table Rewriter]
         C --> D[Session Manager]
     end
@@ -197,7 +197,7 @@ Pass the session ID via connection options:
 conn = psycopg2.connect(
     host="localhost", port=5433,
     database="mydb", user="user", password="pass",
-    options=f"-c marlobu_session={session_id}"
+    options=f"-c astapa_session={session_id}"
 )
 ```
 
@@ -206,13 +206,13 @@ conn = psycopg2.connect(
 const client = new Client({
   host: 'localhost', port: 5433,
   database: 'mydb', user: 'user', password: 'pass',
-  options: `-c marlobu_session=${sessionId}`
+  options: `-c astapa_session=${sessionId}`
 });
 ```
 
 ```bash
 # psql
-psql "host=localhost port=5433 dbname=mydb options='-c marlobu_session=...'"
+psql "host=localhost port=5433 dbname=mydb options='-c astapa_session=...'"
 ```
 
 ## Observability
@@ -221,11 +221,11 @@ Prometheus metrics at `/metrics`:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `marlobu_proxy_connections_active` | Gauge | Current connections |
-| `marlobu_queries_total` | Counter | Queries by type and status |
-| `marlobu_query_duration_seconds` | Histogram | Query latency |
-| `marlobu_sessions_total` | Counter | Sessions by status |
-| `marlobu_approvals_total` | Counter | Approvals by result |
+| `astapa_proxy_connections_active` | Gauge | Current connections |
+| `astapa_queries_total` | Counter | Queries by type and status |
+| `astapa_query_duration_seconds` | Histogram | Query latency |
+| `astapa_sessions_total` | Counter | Sessions by status |
+| `astapa_approvals_total` | Counter | Approvals by result |
 
 ## Limitations
 

@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import type { SessionDetails, ConnectionConfig, BaseConnectionOptions, DiffResponse, MutationsResponse } from './types.js';
 /**
- * Represents an active marlobu session.
+ * Represents an active astapa session.
  * Provides methods to interact with the session and create PostgreSQL connections.
  */
 export declare class Session {

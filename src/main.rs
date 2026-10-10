@@ -30,7 +30,7 @@ async fn main() -> Result<()> {
     // Initialize tracing
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "marlobu_proxy=debug,info".into()),
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "astapa_proxy=debug,info".into()),
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
 
     let config = config::Config::from_env()?;
 
-    tracing::info!("Starting Marlobu proxy");
+    tracing::info!("Starting Astapa proxy");
     tracing::info!("Proxy listening on {}", config.proxy_addr);
     tracing::info!("API listening on {}", config.api_addr);
     tracing::info!("Backend database: {}", redact_url(&config.database_url));

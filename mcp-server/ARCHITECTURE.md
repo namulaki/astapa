@@ -1,8 +1,8 @@
-# Marlobu MCP Server Architecture
+# Astapa MCP Server Architecture
 
 ## Overview
 
-The Marlobu MCP Server provides a Model Context Protocol interface for a PostgreSQL change staging and review system. It enables AI assistants (like Claude Code) to safely interact with databases by **staging changes for human review** rather than applying them directly.
+The Astapa MCP Server provides a Model Context Protocol interface for a PostgreSQL change staging and review system. It enables AI assistants (like Claude Code) to safely interact with databases by **staging changes for human review** rather than applying them directly.
 
 ---
 
@@ -21,13 +21,13 @@ flowchart TB
         Session[Session Manager<br/>lazy initialization]
     end
 
-    subgraph SDK["Marlobu Node SDK"]
-        Client[Marlobu Client]
+    subgraph SDK["Astapa Node SDK"]
+        Client[Astapa Client]
         SessionClass[Session Class]
     end
 
     subgraph External["External Services"]
-        API[Marlobu REST API<br/>port 8080]
+        API[Astapa REST API<br/>port 8080]
         Proxy[PostgreSQL Proxy<br/>port 5433]
         PG[(PostgreSQL<br/>Database)]
     end
@@ -50,10 +50,10 @@ flowchart TB
 ```mermaid
 flowchart LR
     subgraph Tools["MCP Tools (4 total)"]
-        Q[marlobu_query<br/>SELECT only]
-        M[marlobu_mutate<br/>INSERT/UPDATE/DELETE]
-        D[marlobu_diff<br/>View pending changes]
-        P[marlobu_propose<br/>Submit for review]
+        Q[astapa_query<br/>SELECT only]
+        M[astapa_mutate<br/>INSERT/UPDATE/DELETE]
+        D[astapa_diff<br/>View pending changes]
+        P[astapa_propose<br/>Submit for review]
     end
 
     subgraph Validation["SQL Validation"]
@@ -85,8 +85,8 @@ flowchart LR
 sequenceDiagram
     participant CC as Claude Code
     participant MCP as MCP Server
-    participant SDK as Marlobu SDK
-    participant API as Marlobu API
+    participant SDK as Astapa SDK
+    participant API as Astapa API
     participant Proxy as PG Proxy
     participant DB as PostgreSQL
 
@@ -97,10 +97,10 @@ sequenceDiagram
 
     Note over CC,MCP: Tool Discovery
     CC->>MCP: tools/list
-    MCP-->>CC: [marlobu_query, marlobu_mutate, marlobu_diff, marlobu_propose]
+    MCP-->>CC: [astapa_query, astapa_mutate, astapa_diff, astapa_propose]
 
     Note over CC,DB: First Tool Call (Session Creation)
-    CC->>MCP: tools/call {name: "marlobu_query", sql: "SELECT..."}
+    CC->>MCP: tools/call {name: "astapa_query", sql: "SELECT..."}
     MCP->>SDK: createSession({projectId: "claude-code"})
     SDK->>API: POST /sessions
     API-->>SDK: {id: "session-123", ...}
@@ -117,20 +117,20 @@ sequenceDiagram
     MCP-->>CC: {content: [{type: "text", text: JSON.stringify(results)}]}
 
     Note over CC,DB: Mutation (Staged)
-    CC->>MCP: tools/call {name: "marlobu_mutate", sql: "UPDATE..."}
+    CC->>MCP: tools/call {name: "astapa_mutate", sql: "UPDATE..."}
     MCP->>SDK: session.execute("UPDATE...")
     SDK->>Proxy: PostgreSQL mutation (staged in sandbox)
     Proxy-->>SDK: OK (staged, not committed)
     MCP-->>CC: "Mutation staged for review"
 
     Note over CC,DB: Review Flow
-    CC->>MCP: tools/call {name: "marlobu_diff"}
+    CC->>MCP: tools/call {name: "astapa_diff"}
     MCP->>SDK: session.diff()
     SDK->>API: GET /sessions/{id}/diff
     API-->>SDK: {tables: {...changes...}}
     MCP-->>CC: {content: [{type: "text", text: JSON.stringify(diff)}]}
 
-    CC->>MCP: tools/call {name: "marlobu_propose"}
+    CC->>MCP: tools/call {name: "astapa_propose"}
     MCP->>SDK: session.propose()
     SDK->>API: POST /sessions/{id}/propose
     API-->>SDK: {status: "pending_review"}
@@ -164,7 +164,7 @@ flowchart TD
     end
 
     subgraph External["External Calls"]
-        HTTP[HTTP to Marlobu API<br/>sessions, diff, propose]
+        HTTP[HTTP to Astapa API<br/>sessions, diff, propose]
         PGWire[PostgreSQL Wire Protocol<br/>via Proxy]
     end
 
@@ -220,17 +220,17 @@ stateDiagram-v2
 | Component | Lines | Responsibility |
 |-----------|-------|----------------|
 | Environment Config | 11-16 | Load API URL, proxy host/port, DB credentials |
-| Marlobu Client | 18-22 | Initialize SDK client |
+| Astapa Client | 18-22 | Initialize SDK client |
 | MCP Server | 26-29 | Create server with tool capabilities |
 | ListTools Handler | 31-72 | Return tool definitions with JSON schemas |
 | CallTool Handler | 74-127 | Route and execute tool calls |
 | Transport Setup | 129-133 | Connect stdio transport |
 
-### Marlobu SDK
+### Astapa SDK
 
 ```mermaid
 classDiagram
-    class Marlobu {
+    class Astapa {
         -apiUrl: string
         -proxyHost: string
         -proxyPort: number
@@ -263,7 +263,7 @@ classDiagram
         +deletes: Row[]
     }
 
-    Marlobu --> Session : creates
+    Astapa --> Session : creates
     Session --> DiffResponse : returns
     DiffResponse --> TableDiff : contains
 ```
@@ -275,9 +275,9 @@ classDiagram
 ```mermaid
 flowchart LR
     subgraph Environment["Environment Variables"]
-        E1[MARLOBU_API_URL<br/>default: localhost:8080]
-        E2[MARLOBU_PROXY_HOST<br/>default: localhost]
-        E3[MARLOBU_PROXY_PORT<br/>default: 5433]
+        E1[ASTAPA_API_URL<br/>default: localhost:8080]
+        E2[ASTAPA_PROXY_HOST<br/>default: localhost]
+        E3[ASTAPA_PROXY_PORT<br/>default: 5433]
         E4[DATABASE_NAME]
         E5[DATABASE_USER]
         E6[DATABASE_PASSWORD]
@@ -288,7 +288,7 @@ flowchart LR
     end
 
     subgraph Server["MCP Server"]
-        S[marlobu-mcp]
+        S[astapa-mcp]
     end
 
     Settings -->|spawns with env| S
@@ -305,12 +305,12 @@ flowchart LR
 ```json
 {
   "mcpServers": {
-    "marlobu": {
-      "command": "marlobu-mcp",
+    "astapa": {
+      "command": "astapa-mcp",
       "env": {
-        "MARLOBU_API_URL": "http://localhost:8080",
-        "MARLOBU_PROXY_HOST": "localhost",
-        "MARLOBU_PROXY_PORT": "5433",
+        "ASTAPA_API_URL": "http://localhost:8080",
+        "ASTAPA_PROXY_HOST": "localhost",
+        "ASTAPA_PROXY_PORT": "5433",
         "DATABASE_NAME": "myapp",
         "DATABASE_USER": "postgres",
         "DATABASE_PASSWORD": "secret"

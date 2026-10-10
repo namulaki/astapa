@@ -16,13 +16,13 @@ jobs:
         include:
           - target: x86_64-apple-darwin
             os: macos-latest
-            name: marlobu-proxy-darwin-x86_64
+            name: astapa-darwin-x86_64
           - target: aarch64-apple-darwin
             os: macos-latest
-            name: marlobu-proxy-darwin-arm64
+            name: astapa-darwin-arm64
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            name: marlobu-proxy-linux-x86_64
+            name: astapa-linux-x86_64
 
     runs-on: ${{ matrix.os }}
 
@@ -40,7 +40,7 @@ jobs:
       - name: Package (Unix)
         run: |
           cd target/${{ matrix.target }}/release
-          tar -czvf ../../../${{ matrix.name }}.tar.gz marlobu-proxy
+          tar -czvf ../../../${{ matrix.name }}.tar.gz astapa
           cd ../../..
           shasum -a 256 ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
 

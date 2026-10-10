@@ -1,11 +1,11 @@
-# Marlobu Go SDK
+# Astapa Go SDK
 
-Go client library for [marlobu-proxy](https://github.com/apridosimarmata/marlobu-proxy) — a PostgreSQL proxy that enables safe, reviewable database changes through shadow schemas.
+Go client library for [astapa](https://github.com/apridosimarmata/astapa) — a PostgreSQL proxy that enables safe, reviewable database changes through shadow schemas.
 
 ## Installation
 
 ```bash
-go get github.com/apridosimarmata/marlobu-proxy/sdks/go/marlobu
+go get github.com/apridosimarmata/astapa/sdks/go/astapa
 ```
 
 ## Quick Start
@@ -17,14 +17,14 @@ import (
     "context"
     "log"
 
-    "github.com/apridosimarmata/marlobu-proxy/sdks/go/marlobu"
+    "github.com/apridosimarmata/astapa/sdks/go/astapa"
 )
 
 func main() {
     ctx := context.Background()
 
     // Initialize client
-    client := marlobu.NewClient(marlobu.Config{
+    client := astapa.NewClient(astapa.Config{
         APIURL:    "http://localhost:8080",
         ProxyHost: "localhost",
         ProxyPort: 5433,
@@ -76,8 +76,8 @@ func main() {
 
 ```go
 // Create a new client
-client := marlobu.NewClient(marlobu.Config{
-    APIURL:     "http://localhost:8080",  // marlobu-proxy API
+client := astapa.NewClient(astapa.Config{
+    APIURL:     "http://localhost:8080",  // astapa API
     ProxyHost:  "localhost",               // PostgreSQL proxy host
     ProxyPort:  5433,                      // PostgreSQL proxy port
     HTTPClient: nil,                       // Optional custom http.Client
@@ -95,7 +95,7 @@ session, err := client.GetSession(ctx, "session-id")
 ```go
 // Get connection string (DSN format)
 connStr := session.ConnectionString("dbname", "user", "password")
-// => "host=localhost port=5433 dbname=... options='-c marlobu_session=...'"
+// => "host=localhost port=5433 dbname=... options='-c astapa_session=...'"
 
 // Get connection string (URL format)
 connURL := session.ConnectionStringURL("dbname", "user", "password")
@@ -126,10 +126,10 @@ err := session.Destroy(ctx)
 
 ```go
 // Session status constants
-marlobu.StatusActive   // Session is active, accepting changes
-marlobu.StatusProposed // Session submitted for review
-marlobu.StatusApproved // Changes applied to main database
-marlobu.StatusRejected // Changes discarded
+astapa.StatusActive   // Session is active, accepting changes
+astapa.StatusProposed // Session submitted for review
+astapa.StatusApproved // Changes applied to main database
+astapa.StatusRejected // Changes discarded
 
 // DiffResponse contains changes grouped by table
 type DiffResponse struct {
@@ -154,12 +154,12 @@ type MutationsResponse struct {
 
 ### Error Handling
 
-API errors are returned as `*marlobu.APIError`:
+API errors are returned as `*astapa.APIError`:
 
 ```go
 session, err := client.CreateSession(ctx, "project-id")
 if err != nil {
-    if apiErr, ok := err.(*marlobu.APIError); ok {
+    if apiErr, ok := err.(*astapa.APIError); ok {
         log.Printf("API error %d: %s", apiErr.StatusCode, apiErr.Message)
     }
     return err

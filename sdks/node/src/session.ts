@@ -18,7 +18,7 @@ async function parseErrorBody(response: Response): Promise<ErrorBody> {
 }
 
 /**
- * Represents an active marlobu session.
+ * Represents an active astapa session.
  * Provides methods to interact with the session and create PostgreSQL connections.
  */
 export class Session {
@@ -94,7 +94,7 @@ export class Session {
       database: options.database,
       user: options.user,
       password: options.password,
-      options: `-c marlobu_session=${this.id}`,
+      options: `-c astapa_session=${this.id}`,
     };
   }
 
@@ -109,7 +109,7 @@ export class Session {
       database: options.database,
       user: options.user,
       password: options.password,
-      options: `-c marlobu_session=${this.id}`,
+      options: `-c astapa_session=${this.id}`,
     };
 
     const pool = new Pool(config);

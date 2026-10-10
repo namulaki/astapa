@@ -1,4 +1,4 @@
-package marlobu
+package astapa
 
 import "time"
 
@@ -12,7 +12,7 @@ const (
 	StatusRejected SessionStatus = "rejected"
 )
 
-// Session represents a marlobu session returned by the API.
+// Session represents a astapa session returned by the API.
 type Session struct {
 	ID         string        `json:"id"`
 	ProjectID  string        `json:"project_id"`

@@ -1,11 +1,11 @@
 {
-  "name": "@marlobu/mcp-server",
+  "name": "@astapa/mcp-server",
   "version": "0.1.0",
-  "description": "MCP server for Marlobu database sandbox",
+  "description": "MCP server for Astapa database sandbox",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "marlobu-mcp": "./dist/index.js"
+    "astapa-mcp": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "marlobu": "^0.1.0",
+    "astapa": "^0.1.0",
     "pg": "^8.11.0"
   },
   "devDependencies": {

@@ -1,14 +1,14 @@
 /**
- * Marlobu Node.js SDK
+ * Astapa Node.js SDK
  *
- * A TypeScript SDK for interacting with marlobu-proxy,
+ * A TypeScript SDK for interacting with astapa,
  * a PostgreSQL change staging and review system.
  */
 
-export { Marlobu } from './client.js';
+export { Astapa } from './client.js';
 export { Session } from './session.js';
 export type {
-  MarlobuConfig,
+  AstapaConfig,
   CreateSessionOptions,
   SessionDetails,
   SessionStatus,

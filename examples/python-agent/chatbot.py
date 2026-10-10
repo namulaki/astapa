@@ -1,16 +1,16 @@
-"""Multi-turn chatbot with Marlobu database tools."""
+"""Multi-turn chatbot with Astapa database tools."""
 
 import json
 import os
 import re
 from openai import OpenAI
-from marlobu import Marlobu
+from astapa import Astapa
 
 openai = OpenAI()
-marlobu = Marlobu(
-    api_url=os.getenv("MARLOBU_API_URL", "http://localhost:8080"),
-    proxy_host=os.getenv("MARLOBU_PROXY_HOST", "localhost"),
-    proxy_port=int(os.getenv("MARLOBU_PROXY_PORT", "5433")),
+astapa = Astapa(
+    api_url=os.getenv("ASTAPA_API_URL", "http://localhost:8080"),
+    proxy_host=os.getenv("ASTAPA_PROXY_HOST", "localhost"),
+    proxy_port=int(os.getenv("ASTAPA_PROXY_PORT", "5433")),
 )
 
 tools = [
@@ -62,7 +62,7 @@ def validate_sql(sql: str, expected_type: str) -> tuple[bool, str]:
 
 
 def run_chatbot():
-    """Run a multi-turn chatbot with a persistent Marlobu session."""
+    """Run a multi-turn chatbot with a persistent Astapa session."""
 
     required = ["DATABASE_NAME", "DATABASE_USER", "DATABASE_PASSWORD", "OPENAI_API_KEY"]
     missing = [k for k in required if not os.environ.get(k)]
@@ -70,7 +70,7 @@ def run_chatbot():
         print(f"Missing environment variables: {', '.join(missing)}")
         return
 
-    session = marlobu.create_session(project_id="chatbot")
+    session = astapa.create_session(project_id="chatbot")
     session.connect(
         database=os.environ["DATABASE_NAME"],
         user=os.environ["DATABASE_USER"],

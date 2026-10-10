@@ -1,4 +1,4 @@
-package marlobu
+package astapa
 
 import (
 	"bytes"
@@ -10,9 +10,9 @@ import (
 	"time"
 )
 
-// Config holds the configuration for the marlobu client.
+// Config holds the configuration for the astapa client.
 type Config struct {
-	// APIURL is the base URL of the marlobu-proxy API (e.g., "http://localhost:8080")
+	// APIURL is the base URL of the astapa API (e.g., "http://localhost:8080")
 	APIURL string
 
 	// ProxyHost is the hostname of the PostgreSQL proxy (e.g., "localhost")
@@ -25,7 +25,7 @@ type Config struct {
 	HTTPClient *http.Client
 }
 
-// Client is the marlobu-proxy API client.
+// Client is the astapa API client.
 type Client struct {
 	apiURL     string
 	proxyHost  string
@@ -33,7 +33,7 @@ type Client struct {
 	httpClient *http.Client
 }
 
-// NewClient creates a new marlobu client with the given configuration.
+// NewClient creates a new astapa client with the given configuration.
 func NewClient(cfg Config) *Client {
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {

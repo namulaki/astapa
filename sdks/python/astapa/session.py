@@ -1,4 +1,4 @@
-"""Marlobu session management."""
+"""Astapa session management."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import requests
 
 
 class Session:
-    """Represents a Marlobu session with database connection capabilities."""
+    """Represents a Astapa session with database connection capabilities."""
 
     def __init__(
         self,
@@ -62,7 +62,7 @@ class Session:
         """
         return (
             f"postgresql://{user}:{password}@{self._proxy_host}:{self._proxy_port}/{database}"
-            f"?options=-c%20marlobu_session%3D{self.id}"
+            f"?options=-c%20astapa_session%3D{self.id}"
         )
 
     def connect(
@@ -73,7 +73,7 @@ class Session:
         **kwargs: Any,
     ) -> psycopg2.extensions.connection:
         """
-        Create a psycopg2 connection through the Marlobu proxy.
+        Create a psycopg2 connection through the Astapa proxy.
 
         Args:
             database: Database name
@@ -84,7 +84,7 @@ class Session:
         Returns:
             A psycopg2 connection object
         """
-        options = f"-c marlobu_session={self.id}"
+        options = f"-c astapa_session={self.id}"
         if "options" in kwargs:
             options = f"{kwargs.pop('options')} {options}"
 

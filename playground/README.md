@@ -1,4 +1,4 @@
-# Marlobu Playground
+# Astapa Playground
 
 AI-powered database assistant with sandboxed operations. All changes are isolated until you approve them.
 
@@ -17,7 +17,7 @@ cp .env.example .env
 
 ## Usage
 
-Make sure the marlobu proxy is running:
+Make sure the astapa proxy is running:
 ```bash
 cd .. && cargo run --release
 ```
@@ -39,12 +39,12 @@ python agent.py
 ### Programmatic Usage
 
 ```python
-from agent import MarlobuSession, create_marlobu_agent
+from agent import AstapaSession, create_astapa_agent
 
-session = MarlobuSession(project_id="my-project")
+session = AstapaSession(project_id="my-project")
 session.create()
 
-agent = create_marlobu_agent(session)
+agent = create_astapa_agent(session)
 result = agent.invoke({"input": "Show me the top 5 customers by balance"})
 print(result["output"])
 
@@ -54,7 +54,7 @@ session.approve()
 
 ## How It Works
 
-1. Agent connects through marlobu proxy with a session ID
+1. Agent connects through astapa proxy with a session ID
 2. All writes go to shadow tables (production unchanged)
 3. You review the diff
 4. Approve → changes applied atomically with conflict detection

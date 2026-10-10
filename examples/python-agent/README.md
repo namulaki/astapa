@@ -1,12 +1,12 @@
 # Python Agent Examples
 
-Minimal examples showing how to integrate AI agents with Marlobu.
+Minimal examples showing how to integrate AI agents with Astapa.
 
 ## Setup
 
 ```bash
 # Install dependencies
-pip install marlobu openai langchain langchain-openai
+pip install astapa openai langchain langchain-openai
 
 # Set environment variables
 export DATABASE_NAME=<your_database>
@@ -14,9 +14,9 @@ export DATABASE_USER=<your_user>
 export DATABASE_PASSWORD=<your_password>
 export OPENAI_API_KEY=<your_api_key>
 
-# Start the Marlobu proxy (from repo root)
+# Start the Astapa proxy (from repo root)
 DATABASE_URL=postgres://<user>:<password>@localhost/<database> \
-./target/release/marlobu-proxy
+./target/release/astapa
 ```
 
 ## Examples
@@ -55,7 +55,7 @@ Interactive chatbot that maintains conversation history. Type `done` to propose 
 
 ## How it works
 
-1. Agent connects through Marlobu proxy
+1. Agent connects through Astapa proxy
 2. Reads see production data
 3. Writes go to isolated shadow tables
 4. Session proposes changes for review
