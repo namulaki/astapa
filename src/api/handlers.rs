@@ -10,6 +10,7 @@ use std::sync::Arc;
 use tracing::{error, info};
 use uuid::Uuid;
 
+use crate::approval::audit::{persist_audit_log, query_audit_log, AuditEntry, AuditQuery};
 use crate::approval::conflict::{check_row_hash_conflicts, ConflictType};
 use crate::approval::diff::{generate_session_diff, SessionDiff};
 use crate::approval::fk::{validate_fk_constraints, FkViolationType};
@@ -385,7 +386,38 @@ pub async fn approve_session(
         );
     }
 
-    // 7. No conflicts or FK violations - apply changes from shadow to production
+    // 7. No conflicts or FK violations - persist audit log BEFORE applying changes
+    let diff_tables = match generate_session_diff(
+        state.session_manager.pool(),
+        &session.schema_name,
+        &state.source_schema,
+    )
+    .await
+    {
+        Ok(tables) => tables,
+        Err(e) => {
+            error!(error = %e, session_id = %id, "Failed to generate diff for audit");
+            Vec::new() // Continue without audit if diff fails
+        }
+    };
+
+    // Persist audit records (before schema is dropped)
+    if !diff_tables.is_empty() {
+        if let Err(e) = persist_audit_log(
+            state.session_manager.pool(),
+            session.id,
+            &session.project_id,
+            &diff_tables,
+            None, // approved_by: future enhancement
+        )
+        .await
+        {
+            error!(error = %e, session_id = %id, "Failed to persist audit log");
+            // Continue with approval even if audit fails
+        }
+    }
+
+    // 8. Apply changes from shadow to production
     let applied = match apply_shadow_to_production(&client, &session).await {
         Ok(count) => count,
         Err(e) => {
@@ -770,4 +802,58 @@ pub async fn health_check() -> Json<HealthResponse> {
         status: "healthy".to_string(),
         timestamp: Utc::now(),
     })
+}
+
+// ============================================================================
+// Audit Handlers
+// ============================================================================
+
+#[derive(Debug, Serialize)]
+pub struct AuditResponse {
+    pub entries: Vec<AuditEntry>,
+}
+
+/// GET /audit - Query audit log with filters
+pub async fn get_audit_log(
+    State(state): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<AuditQuery>,
+) -> Result<Json<AuditResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let entries = query_audit_log(state.session_manager.pool(), &params)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "Failed to query audit log");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("Failed to query audit log: {}", e),
+                }),
+            )
+        })?;
+
+    Ok(Json(AuditResponse { entries }))
+}
+
+/// GET /sessions/:id/audit - Get audit log for a specific session
+pub async fn get_session_audit(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<AuditResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let query = AuditQuery {
+        session_id: Some(id),
+        ..Default::default()
+    };
+
+    let entries = query_audit_log(state.session_manager.pool(), &query)
+        .await
+        .map_err(|e| {
+            error!(error = %e, session_id = %id, "Failed to query session audit");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("Failed to query audit log: {}", e),
+                }),
+            )
+        })?;
+
+    Ok(Json(AuditResponse { entries }))
 }

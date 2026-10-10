@@ -16,8 +16,8 @@ use crate::metrics;
 use crate::session::SessionManager;
 
 use super::handlers::{
-    approve_session, create_session, delete_session, get_mutations, get_session, get_session_diff,
-    health_check, propose_session, reject_session, AppState,
+    approve_session, create_session, delete_session, get_audit_log, get_mutations, get_session,
+    get_session_audit, get_session_diff, health_check, propose_session, reject_session, AppState,
 };
 
 /// Prometheus metrics endpoint - returns 500 if encoding fails
@@ -48,6 +48,9 @@ pub fn build_router(session_manager: Arc<SessionManager>) -> Router {
         // Session data
         .route("/sessions/:id/mutations", get(get_mutations))
         .route("/sessions/:id/diff", get(get_session_diff))
+        .route("/sessions/:id/audit", get(get_session_audit))
+        // Audit log
+        .route("/audit", get(get_audit_log))
         // Observability
         .route("/health", get(health_check))
         .route("/metrics", get(metrics_handler))
