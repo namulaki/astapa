@@ -1,4 +1,4 @@
-FROM rust:1.75-slim as builder
+FROM rust:1.82-slim as builder
 
 WORKDIR /app
 
@@ -10,7 +10,7 @@ COPY Cargo.toml Cargo.lock ./
 
 # Create dummy src to cache dependencies
 RUN mkdir src && echo "fn main() {}" > src/main.rs
-RUN cargo build --release && rm -rf src target/release/marlobu-proxy
+RUN cargo build --release && rm -rf src target/release/astapa
 
 # Copy actual source
 COPY src ./src
@@ -24,16 +24,16 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
-RUN useradd -r -u 1000 -s /bin/false marlobu
+RUN useradd -r -u 1000 -s /bin/false astapa
 
-COPY --from=builder /app/target/release/marlobu-proxy /usr/local/bin/
+COPY --from=builder /app/target/release/astapa /usr/local/bin/
 
-USER marlobu
+USER astapa
 
-ENV RUST_LOG=marlobu_proxy=info
+ENV RUST_LOG=astapa=info
 ENV PROXY_ADDR=0.0.0.0:5433
 ENV API_ADDR=0.0.0.0:8080
 
 EXPOSE 5433 8080
 
-CMD ["marlobu-proxy"]
+CMD ["astapa"]
