@@ -45,18 +45,29 @@ pub struct AuditQuery {
 }
 
 fn extract_row_id(row: &serde_json::Value) -> String {
-    row.get("id")
-        .and_then(|v| {
-            v.as_str()
-                .map(String::from)
-                .or_else(|| v.as_i64().map(|n| n.to_string()))
-        })
-        .unwrap_or_else(|| {
-            row.as_object()
-                .and_then(|obj| obj.values().next())
-                .map(|v| v.to_string())
-                .unwrap_or_default()
-        })
+    // Try common primary key field names in order of likelihood
+    const PK_FIELDS: &[&str] = &["id", "_id", "uuid", "pk", "key"];
+
+    for field in PK_FIELDS {
+        if let Some(v) = row.get(*field) {
+            if let Some(s) = v.as_str() {
+                return s.to_string();
+            }
+            if let Some(n) = v.as_i64() {
+                return n.to_string();
+            }
+            if let Some(n) = v.as_u64() {
+                return n.to_string();
+            }
+        }
+    }
+
+    // Fallback: compute hash of entire row for uniqueness
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    row.to_string().hash(&mut hasher);
+    format!("hash:{:x}", hasher.finish())
 }
 
 /// Persist audit log entries within an existing transaction.
@@ -258,8 +269,19 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_row_id_fallback() {
-        let row = serde_json::json!({"uuid": "xyz", "name": "test"});
-        assert_eq!(extract_row_id(&row), "\"test\"");
+    fn test_extract_row_id_with_uuid() {
+        let row = serde_json::json!({"uuid": "xyz-456", "name": "test"});
+        assert_eq!(extract_row_id(&row), "xyz-456");
+    }
+
+    #[test]
+    fn test_extract_row_id_fallback_hash() {
+        let row = serde_json::json!({"name": "test", "value": 42});
+        let result = extract_row_id(&row);
+        assert!(
+            result.starts_with("hash:"),
+            "Expected hash prefix, got: {}",
+            result
+        );
     }
 }

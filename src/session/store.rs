@@ -101,7 +101,7 @@ impl SessionStore {
         // Audit log indexes
         client
             .execute(
-                "CREATE INDEX IF NOT EXISTS idx_audit_session ON _astapa_audit_log(session_id)",
+                "CREATE INDEX IF NOT EXISTS idx_audit_session_time ON _astapa_audit_log(session_id, approved_at DESC)",
                 &[],
             )
             .await?;
