@@ -166,49 +166,57 @@ pub async fn query_audit_log(
     let mut param_idx = 1;
 
     if let Some(ref session_id) = query.session_id {
-        sql.push_str(&format!(" AND session_id = ${}", param_idx));
+        sql.push_str(" AND session_id = $");
+        sql.push_str(&param_idx.to_string());
         params.push(session_id);
         param_idx += 1;
     }
 
     if let Some(ref project_id) = query.project_id {
-        sql.push_str(&format!(" AND project_id = ${}", param_idx));
+        sql.push_str(" AND project_id = $");
+        sql.push_str(&param_idx.to_string());
         params.push(project_id);
         param_idx += 1;
     }
 
     if let Some(ref table_name) = query.table_name {
-        sql.push_str(&format!(" AND table_name = ${}", param_idx));
+        sql.push_str(" AND table_name = $");
+        sql.push_str(&param_idx.to_string());
         params.push(table_name);
         param_idx += 1;
     }
 
     if let Some(ref row_id) = query.row_id {
-        sql.push_str(&format!(" AND row_id = ${}", param_idx));
+        sql.push_str(" AND row_id = $");
+        sql.push_str(&param_idx.to_string());
         params.push(row_id);
         param_idx += 1;
     }
 
     if let Some(ref from) = query.from {
-        sql.push_str(&format!(" AND approved_at >= ${}", param_idx));
+        sql.push_str(" AND approved_at >= $");
+        sql.push_str(&param_idx.to_string());
         params.push(from);
         param_idx += 1;
     }
 
     if let Some(ref to) = query.to {
-        sql.push_str(&format!(" AND approved_at <= ${}", param_idx));
+        sql.push_str(" AND approved_at <= $");
+        sql.push_str(&param_idx.to_string());
         params.push(to);
         param_idx += 1;
     }
 
     sql.push_str(" ORDER BY approved_at DESC, id DESC");
 
-    sql.push_str(&format!(" LIMIT ${}", param_idx));
+    sql.push_str(" LIMIT $");
+    sql.push_str(&param_idx.to_string());
     params.push(&limit_val);
     param_idx += 1;
 
     if let Some(ref offset) = query.offset {
-        sql.push_str(&format!(" OFFSET ${}", param_idx));
+        sql.push_str(" OFFSET $");
+        sql.push_str(&param_idx.to_string());
         params.push(offset);
     }
 

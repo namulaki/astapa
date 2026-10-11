@@ -497,7 +497,7 @@ pub async fn approve_session(
         );
     }
 
-    // 6. Update session status to Approved
+    // 12. Update session status to Approved
     if let Err(e) = state
         .session_manager
         .update_status(id, SessionStatus::Approved)
@@ -507,7 +507,7 @@ pub async fn approve_session(
         // Changes already applied, log error but continue
     }
 
-    // 7. Drop the session schema after successful apply
+    // 13. Drop the session schema after successful apply
     if let Err(e) = state
         .session_manager
         .schema_manager()
