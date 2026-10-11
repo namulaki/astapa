@@ -59,90 +59,85 @@ fn extract_row_id(row: &serde_json::Value) -> String {
         })
 }
 
-pub async fn persist_audit_log(
-    pool: &deadpool_postgres::Pool,
+/// Persist audit log entries within an existing transaction.
+/// The caller is responsible for committing the transaction.
+pub async fn persist_audit_log_in_txn(
+    txn: &tokio_postgres::Transaction<'_>,
     session_id: Uuid,
     project_id: &str,
     tables: &[TableDiff],
     approved_by: Option<&str>,
 ) -> Result<usize, AuditError> {
-    let mut client = pool.get().await?;
-    let transaction = client.transaction().await?;
     let mut count = 0;
     let now = Utc::now();
 
     for table in tables {
         for row in &table.inserts {
             let row_id = extract_row_id(row);
-            transaction
-                .execute(
-                    r#"
-                    INSERT INTO _astapa_audit_log
-                    (session_id, project_id, table_name, operation, row_id, old_data, new_data, approved_at, approved_by)
-                    VALUES ($1, $2, $3, 'INSERT', $4, NULL, $5, $6, $7)
-                    "#,
-                    &[
-                        &session_id,
-                        &project_id,
-                        &table.name,
-                        &row_id,
-                        row,
-                        &now,
-                        &approved_by,
-                    ],
-                )
-                .await?;
+            txn.execute(
+                r#"
+                INSERT INTO _astapa_audit_log
+                (session_id, project_id, table_name, operation, row_id, old_data, new_data, approved_at, approved_by)
+                VALUES ($1, $2, $3, 'INSERT', $4, NULL, $5, $6, $7)
+                "#,
+                &[
+                    &session_id,
+                    &project_id,
+                    &table.name,
+                    &row_id,
+                    row,
+                    &now,
+                    &approved_by,
+                ],
+            )
+            .await?;
             count += 1;
         }
 
         for change in &table.updates {
-            transaction
-                .execute(
-                    r#"
-                    INSERT INTO _astapa_audit_log
-                    (session_id, project_id, table_name, operation, row_id, old_data, new_data, approved_at, approved_by)
-                    VALUES ($1, $2, $3, 'UPDATE', $4, $5, $6, $7, $8)
-                    "#,
-                    &[
-                        &session_id,
-                        &project_id,
-                        &table.name,
-                        &change.row_id,
-                        &change.before,
-                        &change.after,
-                        &now,
-                        &approved_by,
-                    ],
-                )
-                .await?;
+            txn.execute(
+                r#"
+                INSERT INTO _astapa_audit_log
+                (session_id, project_id, table_name, operation, row_id, old_data, new_data, approved_at, approved_by)
+                VALUES ($1, $2, $3, 'UPDATE', $4, $5, $6, $7, $8)
+                "#,
+                &[
+                    &session_id,
+                    &project_id,
+                    &table.name,
+                    &change.row_id,
+                    &change.before,
+                    &change.after,
+                    &now,
+                    &approved_by,
+                ],
+            )
+            .await?;
             count += 1;
         }
 
         for row in &table.deletes {
             let row_id = extract_row_id(row);
-            transaction
-                .execute(
-                    r#"
-                    INSERT INTO _astapa_audit_log
-                    (session_id, project_id, table_name, operation, row_id, old_data, new_data, approved_at, approved_by)
-                    VALUES ($1, $2, $3, 'DELETE', $4, $5, NULL, $6, $7)
-                    "#,
-                    &[
-                        &session_id,
-                        &project_id,
-                        &table.name,
-                        &row_id,
-                        row,
-                        &now,
-                        &approved_by,
-                    ],
-                )
-                .await?;
+            txn.execute(
+                r#"
+                INSERT INTO _astapa_audit_log
+                (session_id, project_id, table_name, operation, row_id, old_data, new_data, approved_at, approved_by)
+                VALUES ($1, $2, $3, 'DELETE', $4, $5, NULL, $6, $7)
+                "#,
+                &[
+                    &session_id,
+                    &project_id,
+                    &table.name,
+                    &row_id,
+                    row,
+                    &now,
+                    &approved_by,
+                ],
+            )
+            .await?;
             count += 1;
         }
     }
-
-    transaction.commit().await?;
 
     info!(
         session_id = %session_id,
