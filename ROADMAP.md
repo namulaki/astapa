@@ -104,6 +104,31 @@ Battle-tested for real workloads.
 
 ---
 
+### v1.1.0 — Query Safety
+
+Protect production from dangerous queries before they execute.
+
+- [ ] **Slow query prediction** — Estimate query cost before execution, block or warn if expensive
+- [ ] **Row limit enforcement** — Prevent `SELECT *` on million-row tables, configurable per table
+- [ ] **Missing WHERE detection** — Catch UPDATE/DELETE with no filter before they wipe tables
+- [ ] **Table/column allowlists** — Restrict agents to specific tables and columns
+- [ ] **PII masking** — Auto-redact sensitive columns (email, SSN) unless explicitly allowed
+- [ ] **Query attribution** — Track which agent, session, and context triggered each query
+- [ ] **Anomaly detection** — Alert when agent deviates from normal patterns
+
+---
+
+### v1.2.0 — Schema Intelligence
+
+Help agents understand and work with your schema.
+
+- [ ] **Auto-suggest indexes** — Identify repeated slow patterns and recommend indexes
+- [ ] **Schema drift alerts** — Warn when agents reference columns/tables that changed
+- [ ] **Relationship hints** — Surface foreign keys without querying information_schema
+- [ ] **Schema documentation sync** — Pull column comments into agent context
+
+---
+
 ## Future
 
 ### Ecosystem
