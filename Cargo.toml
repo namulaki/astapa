@@ -1,6 +1,6 @@
 [package]
 name = "astapa"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 description = "Postgres wire protocol proxy for session-based database isolation"
 license = "MIT"
