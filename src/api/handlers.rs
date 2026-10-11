@@ -10,6 +10,7 @@ use std::sync::Arc;
 use tracing::{error, info};
 use uuid::Uuid;
 
+use crate::approval::audit::{persist_audit_log_in_txn, query_audit_log, AuditEntry, AuditQuery};
 use crate::approval::conflict::{check_row_hash_conflicts, ConflictType};
 use crate::approval::diff::{generate_session_diff, SessionDiff};
 use crate::approval::fk::{validate_fk_constraints, FkViolationType};
@@ -444,8 +445,64 @@ pub async fn approve_session(
         );
     }
 
-    // 7. No conflicts or FK violations - apply changes from shadow to production
-    let applied = match apply_shadow_to_production(&client, &session).await {
+    // 7. No conflicts or FK violations - generate diff for audit (mandatory)
+    let diff_tables = match generate_session_diff(
+        state.session_manager.pool(),
+        &session.schema_name,
+        &state.source_schema,
+    )
+    .await
+    {
+        Ok(tables) => tables,
+        Err(e) => {
+            error!(error = %e, session_id = %id, "Failed to generate diff for audit");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(
+                    serde_json::to_value(ErrorResponse {
+                        error: format!("Failed to generate audit diff: {}", e),
+                    })
+                    .unwrap(),
+                ),
+            );
+        }
+    };
+
+    // 8. Start transaction for atomic apply + audit
+    let mut client = match state.session_manager.pool().get().await {
+        Ok(c) => c,
+        Err(e) => {
+            error!(error = %e, "Failed to get database connection for apply");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(
+                    serde_json::to_value(ErrorResponse {
+                        error: "Database connection error".to_string(),
+                    })
+                    .unwrap(),
+                ),
+            );
+        }
+    };
+
+    let txn = match client.transaction().await {
+        Ok(t) => t,
+        Err(e) => {
+            error!(error = %e, "Failed to start transaction");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(
+                    serde_json::to_value(ErrorResponse {
+                        error: "Failed to start transaction".to_string(),
+                    })
+                    .unwrap(),
+                ),
+            );
+        }
+    };
+
+    // 9. Apply changes within transaction
+    let applied = match apply_shadow_to_production_in_txn(&txn, &session).await {
         Ok(count) => count,
         Err(e) => {
             error!(error = %e, session_id = %id, "Failed to apply changes");
@@ -461,7 +518,45 @@ pub async fn approve_session(
         }
     };
 
-    // 6. Update session status to Approved
+    // 10. Persist audit within same transaction (mandatory - ensures atomicity)
+    if !diff_tables.is_empty() {
+        if let Err(e) = persist_audit_log_in_txn(
+            &txn,
+            session.id,
+            &session.project_id,
+            &diff_tables,
+            None, // approved_by: future enhancement
+        )
+        .await
+        {
+            error!(error = %e, session_id = %id, "Failed to persist audit log");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(
+                    serde_json::to_value(ErrorResponse {
+                        error: format!("Failed to persist audit log: {}", e),
+                    })
+                    .unwrap(),
+                ),
+            );
+        }
+    }
+
+    // 11. Commit transaction - both apply and audit succeed or neither does
+    if let Err(e) = txn.commit().await {
+        error!(error = %e, session_id = %id, "Failed to commit transaction");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(
+                serde_json::to_value(ErrorResponse {
+                    error: "Failed to commit changes".to_string(),
+                })
+                .unwrap(),
+            ),
+        );
+    }
+
+    // 12. Update session status to Approved
     if let Err(e) = state
         .session_manager
         .update_status(id, SessionStatus::Approved)
@@ -471,7 +566,7 @@ pub async fn approve_session(
         // Changes already applied, log error but continue
     }
 
-    // 7. Drop the session schema after successful apply
+    // 13. Drop the session schema after successful apply
     if let Err(e) = state
         .session_manager
         .schema_manager()
@@ -500,17 +595,15 @@ pub async fn approve_session(
     )
 }
 
-/// Apply shadow table changes to production
-async fn apply_shadow_to_production(
-    client: &deadpool_postgres::Client,
+/// Apply shadow table changes to production within a transaction
+async fn apply_shadow_to_production_in_txn(
+    txn: &tokio_postgres::Transaction<'_>,
     session: &Session,
 ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
     let mut total_applied = 0;
     let schema = &session.schema_name;
 
-    // Discover shadow tables dynamically from the schema
-    // (proxy creates them without updating session.tables)
-    let shadow_tables: Vec<String> = client
+    let shadow_tables: Vec<String> = txn
         .query(
             r#"
             SELECT table_name
@@ -532,13 +625,11 @@ async fn apply_shadow_to_production(
     );
 
     for shadow_table_name in shadow_tables {
-        // Extract base table name: "_shadow_users" -> "users"
         let table_name = shadow_table_name
             .strip_prefix("_shadow_")
             .unwrap_or(&shadow_table_name);
 
-        // Get primary key from production table
-        let pk_row = client
+        let pk_row = txn
             .query_opt(
                 r#"
                 SELECT a.attname as column_name
@@ -563,9 +654,7 @@ async fn apply_shadow_to_production(
             }
         };
 
-        // Get production table columns and detect sequence-backed ones
-        // Excludes _mlb_op and _mlb_ts which are shadow-only tracking columns
-        let column_info: Vec<(String, bool)> = client
+        let column_info: Vec<(String, bool)> = txn
             .query(
                 r#"
                 SELECT
@@ -591,16 +680,13 @@ async fn apply_shadow_to_production(
         let all_columns: Vec<&str> = column_info.iter().map(|(c, _)| c.as_str()).collect();
         let is_pk_sequence = column_info.iter().any(|(c, is_seq)| c == &pk && *is_seq);
 
-        // Build column list for SELECT (excludes shadow tracking columns)
         let col_list = all_columns
             .iter()
             .map(|c| format!(r#""{}""#, c))
             .collect::<Vec<_>>()
             .join(", ");
 
-        // Apply INSERTs (rows in shadow not yet in prod)
         if is_pk_sequence {
-            // Sequence PK: exclude PK column so Postgres assigns fresh IDs
             let insert_columns: Vec<&str> =
                 all_columns.iter().filter(|c| *c != &pk).copied().collect();
             let insert_col_list = insert_columns
@@ -622,14 +708,13 @@ async fn apply_shadow_to_production(
                 pk = pk,
                 insert_col_list = insert_col_list,
             );
-            let inserted = client.execute(&insert_sql, &[]).await?;
+            let inserted = txn.execute(&insert_sql, &[]).await?;
             total_applied += inserted as usize;
 
             if inserted > 0 {
                 info!(table = %table_name, count = inserted, "Inserted rows with fresh sequence IDs");
             }
         } else {
-            // Non-sequence PK: copy IDs directly
             let insert_sql = format!(
                 r#"
                 INSERT INTO public."{table}" ({col_list})
@@ -643,7 +728,7 @@ async fn apply_shadow_to_production(
                 pk = pk,
                 col_list = col_list,
             );
-            let inserted = client.execute(&insert_sql, &[]).await?;
+            let inserted = txn.execute(&insert_sql, &[]).await?;
             total_applied += inserted as usize;
 
             if inserted > 0 {
@@ -651,7 +736,6 @@ async fn apply_shadow_to_production(
             }
         }
 
-        // Apply UPDATEs (rows in shadow that exist in prod)
         let non_pk_columns: Vec<&str> = all_columns.iter().filter(|c| *c != &pk).copied().collect();
 
         if !non_pk_columns.is_empty() {
@@ -673,7 +757,7 @@ async fn apply_shadow_to_production(
                 pk = pk,
                 set_clause = set_clause,
             );
-            let updated = client.execute(&update_sql, &[]).await?;
+            let updated = txn.execute(&update_sql, &[]).await?;
             total_applied += updated as usize;
 
             if updated > 0 {
@@ -681,7 +765,6 @@ async fn apply_shadow_to_production(
             }
         }
 
-        // Apply DELETEs from _deleted_{table} if it exists
         let delete_sql = format!(
             r#"
             DELETE FROM public."{table}"
@@ -693,7 +776,7 @@ async fn apply_shadow_to_production(
             table = table_name,
             pk = pk,
         );
-        if let Ok(deleted) = client.execute(&delete_sql, &[]).await {
+        if let Ok(deleted) = txn.execute(&delete_sql, &[]).await {
             if deleted > 0 {
                 info!(table = %table_name, count = deleted, "Deleted rows");
                 total_applied += deleted as usize;
@@ -703,7 +786,6 @@ async fn apply_shadow_to_production(
 
     Ok(total_applied)
 }
-
 /// POST /sessions/:id/reject - Reject and discard session
 pub async fn reject_session(
     State(state): State<AppState>,
@@ -829,4 +911,58 @@ pub async fn health_check() -> Json<HealthResponse> {
         status: "healthy".to_string(),
         timestamp: Utc::now(),
     })
+}
+
+// ============================================================================
+// Audit Handlers
+// ============================================================================
+
+#[derive(Debug, Serialize)]
+pub struct AuditResponse {
+    pub entries: Vec<AuditEntry>,
+}
+
+/// GET /audit - Query audit log with filters
+pub async fn get_audit_log(
+    State(state): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<AuditQuery>,
+) -> Result<Json<AuditResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let entries = query_audit_log(state.session_manager.pool(), &params)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "Failed to query audit log");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("Failed to query audit log: {}", e),
+                }),
+            )
+        })?;
+
+    Ok(Json(AuditResponse { entries }))
+}
+
+/// GET /sessions/:id/audit - Get audit log for a specific session
+pub async fn get_session_audit(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<AuditResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let query = AuditQuery {
+        session_id: Some(id),
+        ..Default::default()
+    };
+
+    let entries = query_audit_log(state.session_manager.pool(), &query)
+        .await
+        .map_err(|e| {
+            error!(error = %e, session_id = %id, "Failed to query session audit");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("Failed to query audit log: {}", e),
+                }),
+            )
+        })?;
+
+    Ok(Json(AuditResponse { entries }))
 }

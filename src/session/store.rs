@@ -89,6 +89,63 @@ impl SessionStore {
             )
             .await?;
 
+        // Create audit log table for persistent mutation history
+        client
+            .execute(
+                r#"
+                CREATE TABLE IF NOT EXISTS _astapa_audit_log (
+                    id BIGSERIAL PRIMARY KEY,
+                    session_id UUID NOT NULL,
+                    project_id TEXT NOT NULL,
+                    table_name TEXT NOT NULL,
+                    operation TEXT NOT NULL,
+                    row_id TEXT NOT NULL,
+                    old_data JSONB,
+                    new_data JSONB,
+                    approved_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    approved_by TEXT
+                )
+                "#,
+                &[],
+            )
+            .await?;
+
+        // Audit log indexes
+        client
+            .execute(
+                "CREATE INDEX IF NOT EXISTS idx_audit_session_time ON _astapa_audit_log(session_id, approved_at DESC)",
+                &[],
+            )
+            .await?;
+
+        client
+            .execute(
+                "CREATE INDEX IF NOT EXISTS idx_audit_project ON _astapa_audit_log(project_id)",
+                &[],
+            )
+            .await?;
+
+        client
+            .execute(
+                "CREATE INDEX IF NOT EXISTS idx_audit_table ON _astapa_audit_log(table_name)",
+                &[],
+            )
+            .await?;
+
+        client
+            .execute(
+                "CREATE INDEX IF NOT EXISTS idx_audit_row ON _astapa_audit_log(table_name, row_id)",
+                &[],
+            )
+            .await?;
+
+        client
+            .execute(
+                "CREATE INDEX IF NOT EXISTS idx_audit_time ON _astapa_audit_log(approved_at)",
+                &[],
+            )
+            .await?;
+
         Ok(())
     }
 
