@@ -87,6 +87,32 @@ pub enum FkViolationType {
     WouldOrphan,
 }
 
+/// Get primary key columns for a table
+async fn get_primary_key_columns(
+    client: &deadpool_postgres::Client,
+    schema: &str,
+    table: &str,
+) -> Result<Vec<String>, FkError> {
+    let rows = client
+        .query(
+            r#"
+            SELECT a.attname as column_name
+            FROM pg_constraint c
+            JOIN pg_class t ON t.oid = c.conrelid
+            JOIN pg_namespace n ON n.oid = t.relnamespace
+            JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(c.conkey)
+            WHERE c.contype = 'p'
+              AND n.nspname = $1
+              AND t.relname = $2
+            ORDER BY array_position(c.conkey, a.attnum)
+            "#,
+            &[&schema, &table],
+        )
+        .await?;
+
+    Ok(rows.iter().map(|r| r.get("column_name")).collect())
+}
+
 /// Get all foreign key constraints for tables in the given schema
 pub async fn get_foreign_keys(
     client: &deadpool_postgres::Client,
@@ -397,15 +423,80 @@ async fn check_orphaned_references(
         return Ok(violations);
     }
 
-    // Validate and quote all identifiers
+    // Get primary key columns for source table to join with _deleted table
+    // The _deleted tables only store PK columns, not FK columns
+    let source_pk_cols = get_primary_key_columns(client, source_schema, &fk.source_table).await?;
+    if source_pk_cols.is_empty() {
+        debug!(
+            table = %fk.source_table,
+            "No primary key found for source table, skipping orphan check"
+        );
+        return Ok(violations);
+    }
+
+    // Check if source table also has shadow changes (might have corresponding deletes)
+    let source_has_shadow = shadow_tables.contains(&fk.source_table);
+
+    // Build and execute the orphan check query
+    let query = build_orphan_check_query(
+        session_schema,
+        source_schema,
+        fk,
+        &source_pk_cols,
+        source_has_shadow,
+    )?;
+
+    let rows = client.query(&query, &[]).await?;
+
+    if !rows.is_empty() {
+        let violating_values: Vec<String> = rows
+            .iter()
+            .map(|row| {
+                fk.source_columns
+                    .iter()
+                    .enumerate()
+                    .map(|(i, col)| {
+                        let val: Option<String> = row.try_get(i).ok();
+                        format!("{}={}", col, val.unwrap_or_else(|| "NULL".to_string()))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .collect();
+
+        violations.push(FkViolation {
+            constraint_name: fk.constraint_name.clone(),
+            violation_type: FkViolationType::WouldOrphan,
+            source_table: fk.source_table.clone(),
+            target_table: fk.target_table.clone(),
+            violating_values,
+            message: format!(
+                "DELETE in '{}' would orphan rows in '{}' (constraint: {})",
+                fk.target_table, fk.source_table, fk.constraint_name
+            ),
+        });
+    }
+
+    Ok(violations)
+}
+
+/// Build the SQL query for checking orphaned references.
+/// Extracted for testability - generates the query that checks if deleting rows
+/// from target table would orphan rows in the source table.
+fn build_orphan_check_query(
+    session_schema: &str,
+    source_schema: &str,
+    fk: &ForeignKey,
+    source_pk_cols: &[String],
+    source_has_shadow: bool,
+) -> Result<String, FkError> {
     let session_schema_q = quote_ident(session_schema)?;
     let source_schema_q = quote_ident(source_schema)?;
     let source_table_q = quote_ident(&fk.source_table)?;
-    let _target_table_q = quote_ident(&fk.target_table)?;
     let deleted_target_q = quote_ident(&format!("_deleted_{}", fk.target_table))?;
     let deleted_source_q = quote_ident(&format!("_deleted_{}", fk.source_table))?;
 
-    // Build column references with validation
+    // Build column references for FK join (source FK cols -> deleted target PK cols)
     let mut src_cols: Vec<String> = Vec::new();
     for c in &fk.source_columns {
         let col_q = quote_ident(c)?;
@@ -424,20 +515,16 @@ async fn check_orphaned_references(
         .map(|(s, d)| format!("{} = {}", s, d))
         .collect();
 
-    // Build src_del join condition with validation
+    // Build src_del join condition using PRIMARY KEY columns (not FK columns!)
+    // The _deleted tables only store PK columns, not the full row
     let mut src_del_cond_parts: Vec<String> = Vec::new();
-    for c in &fk.source_columns {
+    for c in source_pk_cols {
         let col_q = quote_ident(c)?;
         src_del_cond_parts.push(format!("src.{} = src_del.{}", col_q, col_q));
     }
     let src_del_cond = src_del_cond_parts.join(" AND ");
 
-    // Check if source table also has shadow changes (might have corresponding deletes)
-    let source_has_shadow = shadow_tables.contains(&fk.source_table);
-
-    // Find rows in source table that reference deleted target rows
     let query = if source_has_shadow {
-        // If source also has changes, exclude rows being deleted from source
         format!(
             r#"
             SELECT DISTINCT {src_cols_select}
@@ -475,38 +562,7 @@ async fn check_orphaned_references(
         )
     };
 
-    let rows = client.query(&query, &[]).await?;
-
-    if !rows.is_empty() {
-        let violating_values: Vec<String> = rows
-            .iter()
-            .map(|row| {
-                fk.source_columns
-                    .iter()
-                    .enumerate()
-                    .map(|(i, col)| {
-                        let val: Option<String> = row.try_get(i).ok();
-                        format!("{}={}", col, val.unwrap_or_else(|| "NULL".to_string()))
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            })
-            .collect();
-
-        violations.push(FkViolation {
-            constraint_name: fk.constraint_name.clone(),
-            violation_type: FkViolationType::WouldOrphan,
-            source_table: fk.source_table.clone(),
-            target_table: fk.target_table.clone(),
-            violating_values,
-            message: format!(
-                "DELETE in '{}' would orphan rows in '{}' (constraint: {})",
-                fk.target_table, fk.source_table, fk.constraint_name
-            ),
-        });
-    }
-
-    Ok(violations)
+    Ok(query)
 }
 
 #[cfg(test)]
@@ -665,5 +721,117 @@ mod tests {
         assert_eq!(fk.source_columns.len(), 2);
         assert_eq!(fk.target_columns.len(), 2);
         assert_eq!(fk.on_delete, "CASCADE");
+    }
+
+    #[test]
+    fn test_build_orphan_check_query_uses_pk_not_fk_columns() {
+        // This is the key test for the FK validation fix:
+        // When checking if deleting from 'users' would orphan rows in 'orders',
+        // the query should use the PRIMARY KEY column ('id') to join with
+        // _deleted_orders, NOT the FK column ('user_id').
+        //
+        // The _deleted_* tables only store: id (PK), _mlb_ts
+        // They do NOT store FK columns like user_id.
+
+        let fk = ForeignKey {
+            constraint_name: "orders_user_id_fkey".to_string(),
+            source_table: "orders".to_string(),
+            source_columns: vec!["user_id".to_string()],
+            target_table: "users".to_string(),
+            target_columns: vec!["id".to_string()],
+            on_delete: "RESTRICT".to_string(),
+            on_update: "CASCADE".to_string(),
+        };
+
+        let source_pk_cols = vec!["id".to_string()];
+
+        let query = build_orphan_check_query(
+            "session_abc123",
+            "public",
+            &fk,
+            &source_pk_cols,
+            true, // source_has_shadow = true
+        )
+        .unwrap();
+
+        // The join with _deleted_users should use the target PK column (del.id)
+        assert!(
+            query.contains("del.\"id\""),
+            "Query should join on del.id (target PK)"
+        );
+
+        // The join with _deleted_orders should use source PK (src.id = src_del.id)
+        // NOT the FK column (user_id)
+        assert!(
+            query.contains("src.\"id\" = src_del.\"id\""),
+            "Query should use PK column 'id' for _deleted_orders join, not FK column 'user_id'"
+        );
+        assert!(
+            !query.contains("src_del.\"user_id\""),
+            "Query should NOT reference user_id on _deleted_orders (it doesn't exist there)"
+        );
+    }
+
+    #[test]
+    fn test_build_orphan_check_query_without_shadow() {
+        let fk = ForeignKey {
+            constraint_name: "orders_user_id_fkey".to_string(),
+            source_table: "orders".to_string(),
+            source_columns: vec!["user_id".to_string()],
+            target_table: "users".to_string(),
+            target_columns: vec!["id".to_string()],
+            on_delete: "RESTRICT".to_string(),
+            on_update: "CASCADE".to_string(),
+        };
+
+        let source_pk_cols = vec!["id".to_string()];
+
+        let query = build_orphan_check_query(
+            "session_abc123",
+            "public",
+            &fk,
+            &source_pk_cols,
+            false, // source_has_shadow = false
+        )
+        .unwrap();
+
+        // Without shadow, there's no NOT EXISTS clause for _deleted_orders
+        assert!(
+            !query.contains("_deleted_orders"),
+            "Query without shadow should not reference _deleted_orders"
+        );
+        assert!(
+            query.contains("_deleted_users"),
+            "Query should still reference _deleted_users"
+        );
+    }
+
+    #[test]
+    fn test_build_orphan_check_query_composite_pk() {
+        let fk = ForeignKey {
+            constraint_name: "order_items_order_id_fkey".to_string(),
+            source_table: "order_items".to_string(),
+            source_columns: vec!["order_id".to_string()],
+            target_table: "orders".to_string(),
+            target_columns: vec!["id".to_string()],
+            on_delete: "RESTRICT".to_string(),
+            on_update: "CASCADE".to_string(),
+        };
+
+        // Composite primary key
+        let source_pk_cols = vec!["order_id".to_string(), "item_id".to_string()];
+
+        let query =
+            build_orphan_check_query("session_xyz", "public", &fk, &source_pk_cols, true).unwrap();
+
+        // Should have both PK columns in the join condition
+        assert!(
+            query.contains("src.\"order_id\" = src_del.\"order_id\""),
+            "Query should include first PK column"
+        );
+        assert!(
+            query.contains("src.\"item_id\" = src_del.\"item_id\""),
+            "Query should include second PK column"
+        );
     }
 }
