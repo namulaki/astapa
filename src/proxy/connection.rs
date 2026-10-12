@@ -261,10 +261,12 @@ impl Connection {
         let backend = TcpStream::connect(&self.backend_addr).await?;
         self.backend = Some(backend);
 
-        // Send startup message to backend (without astapa_session and astapa_mode params)
+        // Send startup message to backend (without astapa_session, astapa_mode, and client_encoding params)
+        // Note: client_encoding causes hangs with cloud-sql-proxy; let PG negotiate it
         let mut backend_params = self.startup_params.clone();
         backend_params.remove("astapa_session");
         backend_params.remove("astapa_mode");
+        backend_params.remove("client_encoding");
 
         // Also strip astapa_session and astapa_mode from options parameter if present
         if let Some(opts) = backend_params.get("options").cloned() {
@@ -278,11 +280,9 @@ impl Connection {
         }
 
         let startup_msg = encode_startup(&backend_params);
-        self.backend
-            .as_mut()
-            .unwrap()
-            .write_all(&startup_msg)
-            .await?;
+        let backend = self.backend.as_mut().unwrap();
+        backend.write_all(&startup_msg).await?;
+        backend.flush().await?;
 
         self.state = ConnectionState::Authenticating;
         debug!("Backend connection established, starting auth");
@@ -295,77 +295,58 @@ impl Connection {
         let backend = self.backend.as_mut().unwrap();
 
         loop {
-            // Read from backend
-            let n = backend.read_buf(&mut self.backend_buffer).await?;
-            if n == 0 {
-                anyhow::bail!("Backend disconnected during authentication");
-            }
+            // Use select! to read from EITHER backend OR client - whoever has data first.
+            // This is critical for SCRAM-SHA-256 auth which requires multiple round trips.
+            tokio::select! {
+                result = backend.read_buf(&mut self.backend_buffer) => {
+                    let n = result?;
+                    if n == 0 {
+                        anyhow::bail!("Backend disconnected during authentication");
+                    }
 
-            // Parse and relay messages
-            while let Some(msg) = parse_backend_message(&mut self.backend_buffer)? {
-                let encoded = encode_backend_message(&msg);
+                    // Parse and relay backend messages to client
+                    while let Some(msg) = parse_backend_message(&mut self.backend_buffer)? {
+                        let encoded = encode_backend_message(&msg);
 
-                match &msg {
-                    BackendMessage::Authentication(payload) => {
-                        // Check if this is AuthenticationOk (type = 0)
-                        if payload.len() >= 4 {
-                            let auth_type = i32::from_be_bytes([
-                                payload[0], payload[1], payload[2], payload[3],
-                            ]);
-                            if auth_type == 0 {
-                                debug!("Authentication successful");
+                        match &msg {
+                            BackendMessage::Authentication(payload) => {
+                                if payload.len() >= 4 {
+                                    let auth_type = i32::from_be_bytes([
+                                        payload[0], payload[1], payload[2], payload[3],
+                                    ]);
+                                    if auth_type == 0 {
+                                        debug!("Authentication successful");
+                                    }
+                                }
+                                self.client.write_all(&encoded).await?;
+                                self.client.flush().await?;
+                            }
+                            BackendMessage::ReadyForQuery(_) => {
+                                self.client.write_all(&encoded).await?;
+                                self.client.flush().await?;
+                                debug!("Backend ready, authentication phase complete");
+                                return Ok(());
+                            }
+                            BackendMessage::ErrorResponse(_) => {
+                                self.client.write_all(&encoded).await?;
+                                self.client.flush().await?;
+                                anyhow::bail!("Backend authentication failed");
+                            }
+                            _ => {
+                                self.client.write_all(&encoded).await?;
+                                self.client.flush().await?;
                             }
                         }
-                        self.client.write_all(&encoded).await?;
-                        self.client.flush().await?;
-                    }
-                    BackendMessage::ReadyForQuery(_) => {
-                        // Authentication complete, send to client
-                        self.client.write_all(&encoded).await?;
-                        self.client.flush().await?;
-                        debug!("Backend ready, authentication phase complete");
-                        return Ok(());
-                    }
-                    BackendMessage::ErrorResponse(_) => {
-                        // Forward error to client
-                        self.client.write_all(&encoded).await?;
-                        self.client.flush().await?;
-                        anyhow::bail!("Backend authentication failed");
-                    }
-                    _ => {
-                        // Relay other messages (ParameterStatus, BackendKeyData, etc.)
-                        self.client.write_all(&encoded).await?;
-                        self.client.flush().await?;
                     }
                 }
-            }
 
-            // Check if backend needs password from client
-            // For now, we only support trust/md5/scram-sha-256 passthrough
-            if !self.client_buffer.is_empty() {
-                // There might be a password message waiting
-                if let Some(msg) = parse_frontend_message(&mut self.client_buffer)? {
-                    if let FrontendMessage::Password(payload) = msg {
-                        // Forward password to backend
-                        let mut pw_msg = BytesMut::new();
-                        pw_msg.extend_from_slice(b"p");
-                        pw_msg.extend_from_slice(&((4 + payload.len()) as i32).to_be_bytes());
-                        pw_msg.extend_from_slice(&payload);
-                        backend.write_all(&pw_msg).await?;
-                        backend.flush().await?;
-                    }
-                }
-            }
-
-            // Read password from client if needed
-            tokio::select! {
                 result = self.client.read_buf(&mut self.client_buffer) => {
                     let n = result?;
                     if n == 0 {
                         anyhow::bail!("Client disconnected during authentication");
                     }
 
-                    // Check for password message
+                    // Parse and forward client auth messages (password/SASL) to backend
                     while let Some(msg) = parse_frontend_message(&mut self.client_buffer)? {
                         if let FrontendMessage::Password(payload) = msg {
                             let mut pw_msg = BytesMut::new();
@@ -376,9 +357,6 @@ impl Connection {
                             backend.flush().await?;
                         }
                     }
-                }
-                _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {
-                    // Small timeout to check backend again
                 }
             }
         }
@@ -452,6 +430,7 @@ impl Connection {
                     FrontendMessage::Sync => {
                         let backend = self.backend.as_mut().unwrap();
                         backend.write_all(&[b'S', 0, 0, 0, 4]).await?;
+                        backend.flush().await?;
                     }
                     FrontendMessage::Other { tag, payload } => {
                         forward_raw_to_backend(self.backend.as_mut().unwrap(), tag, &payload)
@@ -1291,6 +1270,7 @@ async fn forward_raw_to_backend(
     msg.put_i32(4 + payload.len() as i32);
     msg.put_slice(payload);
     backend.write_all(&msg).await?;
+    backend.flush().await?;
     Ok(())
 }
 

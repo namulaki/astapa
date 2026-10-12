@@ -64,9 +64,17 @@ fn extract_table_name(table: &ObjectName) -> &str {
 pub fn should_skip_rewrite(table: &ObjectName) -> bool {
     let name = extract_table_name(table).to_lowercase();
 
-    // Skip PostgreSQL system catalogs
-    if name.starts_with("pg_") || name.starts_with("information_schema") {
+    // Skip PostgreSQL system catalogs by table name
+    if name.starts_with("pg_") {
         return true;
+    }
+
+    // Skip if schema prefix is a system schema (information_schema, pg_catalog)
+    if table.0.len() > 1 {
+        let schema = table.0[0].value.to_lowercase();
+        if schema == "information_schema" || schema == "pg_catalog" {
+            return true;
+        }
     }
 
     // Skip common system tables
@@ -139,7 +147,8 @@ mod tests {
 
     #[test]
     fn test_skip_information_schema() {
-        let table = ObjectName(vec![Ident::new("information_schema_tables")]);
+        // Qualified table with information_schema prefix should be skipped
+        let table = ObjectName(vec![Ident::new("information_schema"), Ident::new("tables")]);
         assert!(should_skip_rewrite(&table));
     }
 

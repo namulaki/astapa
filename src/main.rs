@@ -59,8 +59,15 @@ async fn main() -> Result<()> {
     ));
     session_manager.init().await?;
 
-    // Extract backend address from DATABASE_URL
-    let backend_addr = extract_backend_addr(&config.database_url);
+    // Extract backend address from DATABASE_URL, or use override if set
+    let backend_addr = config
+        .proxy_backend_addr
+        .clone()
+        .unwrap_or_else(|| extract_backend_addr(&config.database_url));
+
+    if config.proxy_backend_addr.is_some() {
+        tracing::info!("Proxy backend override: {}", backend_addr);
+    }
 
     // Start API server in background
     let api_config = config.clone();
