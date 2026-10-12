@@ -171,8 +171,9 @@ impl Connection {
                 match msg {
                     FrontendMessage::SslRequest => {
                         debug!("Received SSL request, rejecting");
-                        // Reject SSL with 'N'
+                        // Reject SSL with 'N' and flush to ensure client receives it
                         self.client.write_all(b"N").await?;
+                        self.client.flush().await?;
                         self.state = ConnectionState::AwaitingStartup;
                     }
                     FrontendMessage::Startup(startup) => {
@@ -306,21 +307,25 @@ impl Connection {
                             }
                         }
                         self.client.write_all(&encoded).await?;
+                        self.client.flush().await?;
                     }
                     BackendMessage::ReadyForQuery(_) => {
                         // Authentication complete, send to client
                         self.client.write_all(&encoded).await?;
+                        self.client.flush().await?;
                         debug!("Backend ready, authentication phase complete");
                         return Ok(());
                     }
                     BackendMessage::ErrorResponse(_) => {
                         // Forward error to client
                         self.client.write_all(&encoded).await?;
+                        self.client.flush().await?;
                         anyhow::bail!("Backend authentication failed");
                     }
                     _ => {
                         // Relay other messages (ParameterStatus, BackendKeyData, etc.)
                         self.client.write_all(&encoded).await?;
+                        self.client.flush().await?;
                     }
                 }
             }
@@ -337,6 +342,7 @@ impl Connection {
                         pw_msg.extend_from_slice(&((4 + payload.len()) as i32).to_be_bytes());
                         pw_msg.extend_from_slice(&payload);
                         backend.write_all(&pw_msg).await?;
+                        backend.flush().await?;
                     }
                 }
             }
@@ -357,6 +363,7 @@ impl Connection {
                             pw_msg.extend_from_slice(&((4 + payload.len()) as i32).to_be_bytes());
                             pw_msg.extend_from_slice(&payload);
                             backend.write_all(&pw_msg).await?;
+                            backend.flush().await?;
                         }
                     }
                 }
@@ -451,6 +458,8 @@ impl Connection {
                 let encoded = encode_backend_message(&msg);
                 self.client.write_all(&encoded).await?;
             }
+            // Flush after processing all pending backend messages
+            self.client.flush().await?;
         }
     }
 
@@ -466,6 +475,7 @@ impl Connection {
             self.client.write_all(&ready).await?;
         }
 
+        self.client.flush().await?;
         Ok(())
     }
 
