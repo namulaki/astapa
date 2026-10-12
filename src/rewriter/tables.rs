@@ -17,6 +17,8 @@ pub enum RewriteContext {
     Write,
     /// Direct write to shadow (for COPY which bypasses triggers)
     DirectWrite,
+    /// Direct read from base table (for clean point lookups)
+    DirectRead,
 }
 
 /// Rewrites a table name for the given schema and context.
@@ -25,17 +27,26 @@ pub enum RewriteContext {
 /// - `users` with Read context → `schema_123._view_users`
 /// - `users` with Write context → `schema_123._view_users` (triggers handle shadow)
 /// - `public.orders` with Read context → `schema_123._view_orders`
+/// - `users` with DirectRead context → `public.users` (bypass view for clean keys)
 pub fn rewrite_table_name(table: &ObjectName, schema: &str, context: RewriteContext) -> ObjectName {
     let table_name = extract_table_name(table);
 
-    // DirectWrite goes to shadow table (for COPY which bypasses triggers)
-    // All other operations go through the view
-    let rewritten_name = match context {
-        RewriteContext::DirectWrite => format!("_shadow_{}", table_name),
-        _ => format!("_view_{}", table_name),
-    };
-
-    ObjectName(vec![Ident::new(schema), Ident::new(rewritten_name)])
+    match context {
+        // DirectWrite goes to shadow table (for COPY which bypasses triggers)
+        RewriteContext::DirectWrite => {
+            let rewritten_name = format!("_shadow_{}", table_name);
+            ObjectName(vec![Ident::new(schema), Ident::new(rewritten_name)])
+        }
+        // DirectRead goes to the base table in public schema (for clean point lookups)
+        RewriteContext::DirectRead => {
+            ObjectName(vec![Ident::new("public"), Ident::new(table_name)])
+        }
+        // All other operations go through the view
+        _ => {
+            let rewritten_name = format!("_view_{}", table_name);
+            ObjectName(vec![Ident::new(schema), Ident::new(rewritten_name)])
+        }
+    }
 }
 
 /// Extracts the base table name, stripping any existing schema prefix.
@@ -99,6 +110,16 @@ mod tests {
         assert_eq!(result.0.len(), 2);
         assert_eq!(result.0[0].value, "sandbox_123");
         assert_eq!(result.0[1].value, "_view_users");
+    }
+
+    #[test]
+    fn test_rewrite_direct_read() {
+        let table = ObjectName(vec![Ident::new("users")]);
+        let result = rewrite_table_name(&table, "sandbox_123", RewriteContext::DirectRead);
+
+        assert_eq!(result.0.len(), 2);
+        assert_eq!(result.0[0].value, "public");
+        assert_eq!(result.0[1].value, "users");
     }
 
     #[test]
