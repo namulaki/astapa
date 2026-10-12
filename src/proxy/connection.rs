@@ -6,6 +6,8 @@
 
 use bytes::BytesMut;
 use deadpool_postgres::Pool;
+use sqlparser::dialect::PostgreSqlDialect;
+use sqlparser::parser::Parser;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -18,7 +20,9 @@ use crate::proxy::protocol::{
     self, encode_backend_message, encode_error, encode_parse, encode_query, encode_startup,
     parse_backend_message, parse_frontend_message, BackendMessage, FrontendMessage, StartupMessage,
 };
-use crate::rewriter::{QueryAnalysis, QueryCache, QueryType, Rewriter};
+use crate::rewriter::{
+    detect_point_lookup, DirtyKeyTracker, QueryAnalysis, QueryCache, QueryType, Rewriter,
+};
 use crate::session::schema::SchemaManager;
 use crate::session::{SessionManager, SessionMode};
 
@@ -74,6 +78,10 @@ pub struct Connection {
     startup_params: HashMap<String, String>,
     /// Tables with infrastructure already ensured (to avoid repeated checks)
     ensured_tables: HashMap<String, EnsuredInfra>,
+    /// Tracks dirty (modified/deleted) keys per table for point lookup optimization
+    dirty_tracker: DirtyKeyTracker,
+    /// Cached primary key column names per table (table_name -> pk_column)
+    pk_cache: HashMap<String, String>,
 }
 
 /// Tracks what infrastructure has been ensured for a table
@@ -111,6 +119,8 @@ impl Connection {
             state: ConnectionState::Initial,
             startup_params: HashMap::new(),
             ensured_tables: HashMap::new(),
+            dirty_tracker: DirtyKeyTracker::new(),
+            pk_cache: HashMap::new(),
         }
     }
 
@@ -598,8 +608,13 @@ impl Connection {
         }
 
         // If we have a rewriter (session mode), use it
-        if let Some(ref rewriter) = self.rewriter {
+        if self.rewriter.is_some() {
             let schema = self.schema_name.clone().unwrap();
+
+            // Try point lookup optimization for SELECT queries
+            if let Some(direct_sql) = self.try_point_lookup_optimization(trimmed, &schema).await {
+                return direct_sql;
+            }
 
             // Check cache first
             if let Some(cached) = self.query_cache.get(&schema, trimmed) {
@@ -612,11 +627,16 @@ impl Connection {
                     warn!(error = %e, "Failed to ensure infrastructure, query may fail");
                 }
                 debug!(query_type = ?cached.query_type, "Query (cached)");
+
+                // Track writes for dirty key tracking
+                self.track_dirty_keys_from_query(trimmed, &cached.query_type, &cached.write_tables);
+
                 return cached.sql;
             }
 
             // Parse and rewrite
             QUERY_CACHE_MISSES.with_label_values(&[&schema]).inc();
+            let rewriter = self.rewriter.as_ref().unwrap();
             match rewriter.analyze(query) {
                 Ok(analysis) => {
                     // Ensure infrastructure exists for all referenced tables
@@ -627,6 +647,15 @@ impl Connection {
 
                     // Cache the result
                     self.query_cache.insert(&schema, trimmed, &analysis);
+
+                    // Track writes for dirty key tracking
+                    let write_tables: Vec<String> = analysis
+                        .tables
+                        .iter()
+                        .filter(|t| t.is_write_target)
+                        .map(|t| t.name.clone())
+                        .collect();
+                    self.track_dirty_keys_from_query(trimmed, &analysis.query_type, &write_tables);
 
                     analysis.sql
                 }
@@ -639,6 +668,293 @@ impl Connection {
         } else {
             // No session - pass through unchanged
             query.to_string()
+        }
+    }
+
+    /// Try to optimize a SELECT query by routing clean point lookups directly to base table.
+    /// Returns Some(rewritten_sql) if optimization applies, None otherwise.
+    async fn try_point_lookup_optimization(
+        &mut self,
+        query: &str,
+        _schema: &str,
+    ) -> Option<String> {
+        // Parse the query
+        let dialect = PostgreSqlDialect {};
+        let statements = Parser::parse_sql(&dialect, query).ok()?;
+
+        if statements.len() != 1 {
+            return None;
+        }
+
+        // Try to detect a point lookup (returns None if table PK not in cache)
+        let point_lookup = detect_point_lookup(&statements[0], &self.pk_cache)?;
+
+        // Check if ALL requested keys are clean
+        let all_clean = point_lookup
+            .pk_values
+            .iter()
+            .all(|pk| self.dirty_tracker.is_clean(&point_lookup.table_name, pk));
+
+        if !all_clean {
+            debug!(
+                table = %point_lookup.table_name,
+                keys = ?point_lookup.pk_values,
+                "Point lookup has dirty keys, using view"
+            );
+            return None;
+        }
+
+        // All keys are clean - rewrite to use public.{table} directly
+        debug!(
+            table = %point_lookup.table_name,
+            keys = ?point_lookup.pk_values,
+            "Point lookup optimization: routing to base table"
+        );
+
+        // Rewrite the query to use public.{table} instead of the view
+        // Simple string replacement for the table name
+        let rewritten = self.rewrite_for_direct_read(query, &point_lookup.table_name);
+
+        Some(rewritten)
+    }
+
+    /// Rewrite a query to read directly from the public schema (for clean point lookups).
+    fn rewrite_for_direct_read(&self, query: &str, table_name: &str) -> String {
+        // For simple cases, we can do string replacement
+        // The table might appear as: users, "users", public.users, "public"."users"
+        // We want to ensure it becomes public.{table}
+
+        // Parse and rewrite properly using sqlparser
+        let dialect = PostgreSqlDialect {};
+        if let Ok(mut statements) = Parser::parse_sql(&dialect, query) {
+            if statements.len() == 1 {
+                // Rewrite table references to public.{table}
+                self.rewrite_statement_for_direct_read(&mut statements[0], table_name);
+                return statements[0].to_string();
+            }
+        }
+
+        // Fallback: simple string approach (less robust but handles most cases)
+        query.to_string()
+    }
+
+    /// Rewrite a statement to use public.{table} for direct reads.
+    fn rewrite_statement_for_direct_read(
+        &self,
+        stmt: &mut sqlparser::ast::Statement,
+        table_name: &str,
+    ) {
+        use sqlparser::ast::*;
+
+        if let Statement::Query(ref mut query) = stmt {
+            if let SetExpr::Select(ref mut select) = *query.body {
+                for table_with_joins in &mut select.from {
+                    self.rewrite_table_factor_for_direct_read(
+                        &mut table_with_joins.relation,
+                        table_name,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Rewrite a table factor to use public schema.
+    fn rewrite_table_factor_for_direct_read(
+        &self,
+        table_factor: &mut sqlparser::ast::TableFactor,
+        target_table: &str,
+    ) {
+        use sqlparser::ast::*;
+
+        if let TableFactor::Table { ref mut name, .. } = table_factor {
+            // Check if this is the target table
+            if let Some(last) = name.0.last() {
+                if last.value.eq_ignore_ascii_case(target_table) {
+                    // Rewrite to public.{table}
+                    *name = ObjectName(vec![Ident::new("public"), Ident::new(target_table)]);
+                }
+            }
+        }
+    }
+
+    /// Track dirty keys when a write query is processed.
+    fn track_dirty_keys_from_query(
+        &mut self,
+        query: &str,
+        query_type: &QueryType,
+        write_tables: &[String],
+    ) {
+        match query_type {
+            QueryType::Insert | QueryType::Update | QueryType::Delete => {
+                // For now, mark the entire table as dirty for range writes
+                // A more sophisticated implementation would extract PKs from WHERE clauses
+                for table in write_tables {
+                    self.mark_table_dirty_from_write(query, table, query_type);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Mark a table dirty based on a write query.
+    /// For point writes (WHERE pk = X), marks specific keys.
+    /// For range writes, marks the entire table as dirty.
+    fn mark_table_dirty_from_write(&mut self, query: &str, table: &str, query_type: &QueryType) {
+        let table_lower = table.to_lowercase();
+
+        // Try to extract specific PK values from WHERE clause
+        if let Some(pk_column) = self.pk_cache.get(&table_lower) {
+            if let Some(pk_values) = self.extract_pk_from_write_query(query, pk_column, query_type)
+            {
+                // Point write - mark specific keys
+                for pk in pk_values {
+                    debug!(table = %table, pk = %pk, "Marking key dirty");
+                    self.dirty_tracker.mark_dirty(&table_lower, &pk);
+                }
+                return;
+            }
+        }
+
+        // Range write or couldn't extract PKs - mark entire table dirty
+        debug!(table = %table, "Marking entire table dirty (range write)");
+        self.dirty_tracker.mark_table_fully_dirty(&table_lower);
+    }
+
+    /// Try to extract PK values from a write query's WHERE clause.
+    fn extract_pk_from_write_query(
+        &self,
+        query: &str,
+        pk_column: &str,
+        query_type: &QueryType,
+    ) -> Option<Vec<String>> {
+        let dialect = PostgreSqlDialect {};
+        let statements = Parser::parse_sql(&dialect, query).ok()?;
+
+        if statements.len() != 1 {
+            return None;
+        }
+
+        match (&statements[0], query_type) {
+            (sqlparser::ast::Statement::Insert { source, .. }, QueryType::Insert) => {
+                // For INSERT, try to extract PK from VALUES clause
+                self.extract_pk_from_insert(source.as_ref()?, pk_column)
+            }
+            (sqlparser::ast::Statement::Update { selection, .. }, QueryType::Update) => {
+                // For UPDATE, extract PK from WHERE clause
+                selection
+                    .as_ref()
+                    .and_then(|sel| self.extract_pk_from_where(sel, pk_column))
+            }
+            (sqlparser::ast::Statement::Delete { selection, .. }, QueryType::Delete) => {
+                // For DELETE, extract PK from WHERE clause
+                selection
+                    .as_ref()
+                    .and_then(|sel| self.extract_pk_from_where(sel, pk_column))
+            }
+            _ => None,
+        }
+    }
+
+    /// Extract PK values from an INSERT's VALUES clause.
+    fn extract_pk_from_insert(
+        &self,
+        source: &sqlparser::ast::Query,
+        _pk_column: &str,
+    ) -> Option<Vec<String>> {
+        // INSERT ... SELECT is a range write
+        if let sqlparser::ast::SetExpr::Values(ref values) = *source.body {
+            // For now, mark as range write - extracting PKs from VALUES requires
+            // knowing column positions which adds complexity
+            // TODO: Implement proper PK extraction from VALUES
+            let _ = values;
+        }
+        None
+    }
+
+    /// Extract PK values from a WHERE clause (for UPDATE/DELETE).
+    fn extract_pk_from_where(
+        &self,
+        expr: &sqlparser::ast::Expr,
+        pk_column: &str,
+    ) -> Option<Vec<String>> {
+        use sqlparser::ast::*;
+
+        match expr {
+            Expr::BinaryOp { left, op, right } => {
+                match op {
+                    BinaryOperator::Eq => {
+                        // Check if this is pk = value
+                        if self.is_column_ref(left, pk_column) {
+                            return self.extract_literal(right).map(|v| vec![v]);
+                        }
+                        if self.is_column_ref(right, pk_column) {
+                            return self.extract_literal(left).map(|v| vec![v]);
+                        }
+                        None
+                    }
+                    BinaryOperator::And => {
+                        // Try both sides
+                        self.extract_pk_from_where(left, pk_column)
+                            .or_else(|| self.extract_pk_from_where(right, pk_column))
+                    }
+                    _ => None, // Range or OR conditions
+                }
+            }
+            Expr::InList {
+                expr,
+                list,
+                negated,
+            } if !negated => {
+                if self.is_column_ref(expr, pk_column) {
+                    let values: Vec<String> = list
+                        .iter()
+                        .filter_map(|e| self.extract_literal(e))
+                        .collect();
+                    if values.len() == list.len() {
+                        return Some(values);
+                    }
+                }
+                None
+            }
+            Expr::Nested(inner) => self.extract_pk_from_where(inner, pk_column),
+            _ => None,
+        }
+    }
+
+    /// Check if an expression is a column reference.
+    fn is_column_ref(&self, expr: &sqlparser::ast::Expr, column_name: &str) -> bool {
+        use sqlparser::ast::*;
+        match expr {
+            Expr::Identifier(ident) => ident.value.eq_ignore_ascii_case(column_name),
+            Expr::CompoundIdentifier(idents) => idents
+                .last()
+                .map(|i| i.value.eq_ignore_ascii_case(column_name))
+                .unwrap_or(false),
+            _ => false,
+        }
+    }
+
+    /// Extract a literal value from an expression.
+    fn extract_literal(&self, expr: &sqlparser::ast::Expr) -> Option<String> {
+        use sqlparser::ast::*;
+        match expr {
+            Expr::Value(v) => match v {
+                Value::Number(n, _) => Some(n.clone()),
+                Value::SingleQuotedString(s) => Some(s.clone()),
+                Value::DoubleQuotedString(s) => Some(s.clone()),
+                _ => None,
+            },
+            Expr::UnaryOp {
+                op: UnaryOperator::Minus,
+                expr,
+            } => {
+                if let Expr::Value(Value::Number(n, _)) = expr.as_ref() {
+                    Some(format!("-{}", n))
+                } else {
+                    None
+                }
+            }
+            _ => None,
         }
     }
 
@@ -694,11 +1010,13 @@ impl Connection {
             let results = futures::future::join_all(futures).await;
             for result in results {
                 match result {
-                    Ok((table_name, _pk)) => {
-                        let infra = self.ensured_tables.entry(table_name).or_default();
+                    Ok((table_name, pk)) => {
+                        let infra = self.ensured_tables.entry(table_name.clone()).or_default();
                         infra.view = true;
                         infra.shadow = true;
                         infra.deleted = true;
+                        // Cache the PK for point lookup optimization
+                        self.pk_cache.insert(table_name.to_lowercase(), pk);
                     }
                     Err(e) => {
                         warn!(error = %e, "Failed to create infrastructure");
@@ -769,6 +1087,14 @@ impl Connection {
             infra.view = true;
             infra.shadow = true;
             infra.deleted = true;
+            // Fetch and cache the PK for point lookup optimization
+            if let Ok(pk) = self
+                .schema_manager
+                .get_primary_key("public", &table_name)
+                .await
+            {
+                self.pk_cache.insert(table_name.to_lowercase(), pk);
+            }
         }
 
         for table_name in needs_shadow {
