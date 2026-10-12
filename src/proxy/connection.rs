@@ -171,8 +171,9 @@ impl Connection {
                 match msg {
                     FrontendMessage::SslRequest => {
                         debug!("Received SSL request, rejecting");
-                        // Reject SSL with 'N'
+                        // Reject SSL with 'N' and flush to ensure client receives it
                         self.client.write_all(b"N").await?;
+                        self.client.flush().await?;
                         self.state = ConnectionState::AwaitingStartup;
                     }
                     FrontendMessage::Startup(startup) => {
