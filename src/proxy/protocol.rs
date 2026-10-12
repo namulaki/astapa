@@ -339,14 +339,40 @@ pub fn encode_parse(name: &str, query: &str, param_types: &[i32]) -> BytesMut {
 }
 
 /// Encode a startup message
+/// Note: Parameters are encoded in a specific order (user, database first) for compatibility
+/// with some proxies that may be sensitive to parameter ordering.
 pub fn encode_startup(parameters: &HashMap<String, String>) -> BytesMut {
     let mut params_buf = BytesMut::new();
-    for (key, value) in parameters {
-        params_buf.put_slice(key.as_bytes());
-        params_buf.put_u8(0);
-        params_buf.put_slice(value.as_bytes());
-        params_buf.put_u8(0);
+
+    // Encode in a fixed order: user first, then database, then others alphabetically
+    // This ensures consistent ordering regardless of HashMap iteration
+    let priority_keys = ["user", "database"];
+
+    for key in &priority_keys {
+        if let Some(value) = parameters.get(*key) {
+            params_buf.put_slice(key.as_bytes());
+            params_buf.put_u8(0);
+            params_buf.put_slice(value.as_bytes());
+            params_buf.put_u8(0);
+        }
     }
+
+    // Then encode remaining parameters (sorted for consistency)
+    let mut other_keys: Vec<_> = parameters
+        .keys()
+        .filter(|k| !priority_keys.contains(&k.as_str()))
+        .collect();
+    other_keys.sort();
+
+    for key in other_keys {
+        if let Some(value) = parameters.get(key) {
+            params_buf.put_slice(key.as_bytes());
+            params_buf.put_u8(0);
+            params_buf.put_slice(value.as_bytes());
+            params_buf.put_u8(0);
+        }
+    }
+
     params_buf.put_u8(0); // terminator
 
     let mut buf = BytesMut::new();

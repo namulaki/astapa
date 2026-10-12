@@ -7,6 +7,9 @@ pub struct Config {
     pub proxy_addr: String,
     pub api_addr: String,
     pub database_url: String,
+    /// Optional override for proxy backend address (e.g., "127.0.0.1:5556" for cloud-sql-proxy)
+    /// If not set, extracted from DATABASE_URL
+    pub proxy_backend_addr: Option<String>,
     pub session_ttl_seconds: u64,
     pub default_mode: SessionMode,
 }
@@ -23,6 +26,7 @@ impl Config {
             api_addr: std::env::var("API_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into()),
             database_url: std::env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "postgresql://postgres@localhost:5432/astapa".into()),
+            proxy_backend_addr: std::env::var("PROXY_BACKEND_ADDR").ok(),
             session_ttl_seconds: std::env::var("SESSION_TTL_SECONDS")
                 .ok()
                 .and_then(|s| s.parse().ok())
